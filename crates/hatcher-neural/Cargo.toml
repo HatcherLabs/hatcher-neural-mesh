@@ -1,19 +1,33 @@
 [package]
 name = "hatcher-neural"
-version = "0.1.0"
-edition = "2021"
-authors = ["HatcherLabs"]
-description = "A Rust-native agentic neural mesh with deterministic evolution rules and zk-style node serialization."
-license = "MIT"
-repository = "https://github.com/hatcherlabs/hatcher-neural-network-mesh"
-homepage = "https://github.com/hatcherlabs/hatcher-neural-network-mesh"
-keywords = ["agentic", "mesh", "neural", "serialization", "rust"]
+description = "The HAMNS engine: ten agentic-mesh equations, a self-organizing trust graph, GNN message passing, and a swappable ONNX decision head."
+keywords = ["agentic", "mesh", "multi-agent", "neural", "onnx"]
 categories = ["algorithms", "science", "simulation"]
-readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# Load a trained policy from an .onnx file as the mesh's decision head.
+# Backed by tract, which is pure Rust: enabling this adds no native ONNX Runtime
+# library to ship, download, or version-match against the host. Note that tract
+# raises the minimum supported Rust version for this crate to 1.91.
+onnx = ["dep:tract-onnx"]
 
 [dependencies]
-hatcher-core = { path = "../hatcher-core", version = "0.1.0" }
+hatcher-core = { path = "../hatcher-core", version = "0.2.0" }
 ndarray = "0.16"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-once = "0.1"
+serde.workspace = true
+serde_json.workspace = true
+tract-onnx = { version = "0.23", optional = true }
+
+# Document the ONNX backend on docs.rs even though the feature is off by default.
+[package.metadata.docs.rs]
+features = ["onnx"]
+rustdoc-args = ["--cfg", "docsrs"]

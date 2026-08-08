@@ -1,21 +1,29 @@
 [package]
 name = "hatcher-ux"
-version = "0.1.0"
-edition = "2021"
-authors = ["HatcherLabs"]
-description = "Terminal UX demonstrating the Hatcher neural mesh as an agentic playground."
-license = "MIT"
-repository = "https://github.com/hatcherlabs/hatcher-neural-network-mesh"
-homepage = "https://github.com/hatcherlabs/hatcher-neural-network-mesh"
-keywords = ["agentic", "ux", "terminal", "mesh", "rust"]
-categories = ["command-line-utilities", "simulation"]
-readme = "../../README.md"
+description = "Terminal console and HTTP API for the Hatcher agent mesh, shaped for the hatcher-host-frontend dashboard."
+keywords = ["agentic", "mesh", "multi-agent", "terminal", "api"]
+categories = ["command-line-utilities", "science", "simulation"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+# Overrides the workspace MSRV: the warp/tokio dependency tree needs 1.86, verified
+# by compiling against 1.85 (fails) and 1.86 (passes).
+rust-version = "1.86"
+
+[features]
+default = []
+# Pass through to hatcher-neural: load an .onnx policy as the decision head.
+onnx = ["hatcher-neural/onnx", "hatcher-playground/onnx"]
 
 [dependencies]
-hatcher-core = { path = "../hatcher-core", version = "0.1.0" }
-hatcher-neural = { path = "../hatcher-neural", version = "0.1.0" }
-hatcher-playground = { path = "../hatcher-playground", version = "0.1.0" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+hatcher-core = { path = "../hatcher-core", version = "0.2.0" }
+hatcher-neural = { path = "../hatcher-neural", version = "0.2.0" }
+hatcher-playground = { path = "../hatcher-playground", version = "0.2.0" }
+serde.workspace = true
+serde_json.workspace = true
 warp = "0.3"
 tokio = { version = "1", features = ["full"] }

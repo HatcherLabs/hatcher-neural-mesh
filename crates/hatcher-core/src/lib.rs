@@ -1,38 +1,68 @@
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+//! # HatcherLabs Agent Mesh Neural System — contracts
+//!
+//! `hatcher-core` is the typed contract layer for HAMNS: an adaptive, decentralized
+//! multi-agent intelligence framework in which agent capability is multiplicative,
+//! collective intelligence is emergent rather than additive, trust is learned from
+//! outcomes, and the whole mesh carries a single global intelligence state.
+//!
+//! ## The five layers
+//!
+//! | Layer | Question it answers | Module |
+//! |---|---|---|
+//! | 1. Global intelligence | Is the mesh getting smarter? | [`global`] |
+//! | 2. Agent capability | What is one agent worth? | [`agent`] |
+//! | 3. Mesh intelligence | What is the cohort worth, connected? | [`graph`] |
+//! | 4. Dynamic trust | Who should talk to whom? | [`graph`] |
+//! | 5. Priority & resources | What runs next, and where? | [`task`], [`agent`] |
+//!
+//! ## The ten equations
+//!
+//! ```text
+//! 1.  Global intelligence   Ω(t+1) = Ω(t) + α(L + E + C) − β(F + D)
+//! 2.  Agent capability      A_i    = I_i · S_i · P_i · C_i · M_i
+//! 3.  Mesh intelligence     A      = Σ A_i + γ Σ_{i≠j} A_i A_j W_ij
+//! 4.  Trust evolution       T_ij(t+1) = T_ij(t) + λ S_ij − μ E_ij
+//! 5.  Priority              P      = (U · B · I) / (C + τ)
+//! 6.  Memory evolution      M_i(t+1) = M_i(t) + η K_i − δ R_i
+//! 7.  Confidence            C_i(t+1) = C_i(t) + σ·success − ρ·error
+//! 8.  Specialization        S_i(t+1) = S_i(t) + κ·experience − ω·obsolescence
+//! 9.  Network plasticity    W_ij(t+1) = W_ij(t) + φ T_ij − ψ·latency
+//! 10. Resource ratio        R_i    = P_i / (Energy_i + Latency_i)
+//! ```
+//!
+//! The equations themselves live in `hatcher-neural`; this crate defines the state
+//! they operate on, and seals that state into digest-backed [`envelope::Envelope`]s
+//! so any mesh observation can be attested to by the Hatcher control plane.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiRequest {
-    pub agent_id: String,
-    pub prompt: String,
-    pub features: Vec<f64>,
-}
+pub mod agent;
+pub mod api;
+pub mod coefficients;
+pub mod envelope;
+pub mod global;
+pub mod graph;
+pub mod memory;
+pub mod task;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiResponse {
-    pub accepted: bool,
-    pub action: String,
-    pub confidence: f64,
-    pub trace_id: String,
-}
+pub use agent::{AgentNode, AgentRole, CapabilityVector, ExecutionMode, NodeTelemetry, ResourceProfile};
+pub use api::{
+    AgentSummary, ApiRequest, ApiResponse, HatcherRequest, HatcherResponse, MeshAction, MeshAnalytics,
+    MeshConfigView, MeshGraphView, MeshOverview, NeuralSignal, TaskResult, TaskSubmission, TrustMatrixView,
+};
+pub use coefficients::{CoefficientError, MeshCoefficients};
+pub use envelope::{canonical_digest, fold_digests, Envelope, CANONICAL_CODEC, SCHEMA_VERSION};
+pub use global::{GlobalState, OmegaDelta, OmegaLedger, OmegaRegime, OmegaSample};
+pub use graph::{MeshEdge, MeshIntelligence, MeshSimulation, MeshState, MeshStepResult};
+pub use memory::{MemoryGraph, MemoryRecord};
+pub use task::{
+    Assignment, PipelineStage, PipelineTrace, PriorityBand, PriorityScore, StageRecord, TaskSpec,
+    DEFERRED_THRESHOLD, IMMEDIATE_THRESHOLD,
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AgentRole {
-    Orchestrator,
-    Executor,
-    Critic,
-    Explorer,
-    Guardian,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ExecutionMode {
-    Sandbox,
-    Controlled,
-    Production,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Shape and identity of an inference model bound to the mesh.
+///
+/// Used by the native engine for dimension checks and by the ONNX backend to
+/// validate that a loaded graph matches what the mesh expects to feed it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModelSpec {
     pub name: String,
     pub version: String,
@@ -41,184 +71,33 @@ pub struct ModelSpec {
     pub output_dim: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NeuralSignal {
-    pub agent: String,
-    pub intent: String,
-    pub confidence: f64,
-    pub action: String,
-    pub rationale: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HatcherRequest {
-    pub agent_id: String,
-    pub role: AgentRole,
-    pub execution_mode: ExecutionMode,
-    pub prompt: String,
-    pub features: Vec<f64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HatcherResponse {
-    pub accepted: bool,
-    pub decision: NeuralSignal,
-    pub trace_id: String,
-}
-
-impl HatcherResponse {
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string_pretty(self)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MemoryGraph {
-    pub nodes: Vec<String>,
-    pub edges: Vec<(String, String)>,
-}
-
-impl MemoryGraph {
-    pub fn add_node(&mut self, node: impl Into<String>) {
-        let node = node.into();
-        if !self.nodes.contains(&node) {
-            self.nodes.push(node);
-        }
-    }
-
-    pub fn add_edge(&mut self, from: impl Into<String>, to: impl Into<String>) {
-        let from = from.into();
-        let to = to.into();
-        self.add_node(&from);
-        self.add_node(&to);
-        if !self.edges.contains(&(from.clone(), to.clone())) {
-            self.edges.push((from, to));
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgenticNodeData {
-    pub id: String,
-    pub label: String,
-    pub omega: f64,
-    pub learning: f64,
-    pub exploration: f64,
-    pub cohesion: f64,
-    pub friction: f64,
-    pub disruption: f64,
-    pub intention: f64,
-    pub stability: f64,
-    pub policy: f64,
-    pub coherence: f64,
-    pub memory: f64,
-    pub capacity: f64,
-    pub utilization: f64,
-    pub bandwidth: f64,
-    pub intensity: f64,
-    pub tau: f64,
-}
-
-impl AgenticNodeData {
-    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+impl ModelSpec {
+    pub fn new(name: impl Into<String>, version: impl Into<String>, input_dim: usize, hidden_dim: usize, output_dim: usize) -> Self {
         Self {
-            id: id.into(),
-            label: label.into(),
-            omega: 1.0,
-            learning: 0.3,
-            exploration: 0.2,
-            cohesion: 0.4,
-            friction: 0.1,
-            disruption: 0.05,
-            intention: 0.4,
-            stability: 0.5,
-            policy: 0.6,
-            coherence: 0.7,
-            memory: 0.3,
-            capacity: 1.0,
-            utilization: 0.5,
-            bandwidth: 1.0,
-            intensity: 0.4,
-            tau: 0.1,
+            name: name.into(),
+            version: version.into(),
+            input_dim,
+            hidden_dim,
+            output_dim,
         }
     }
 
-    pub fn to_zk_envelope(&self) -> Result<SerializedNodeEnvelope, serde_json::Error> {
-        let canonical_payload = serde_json::to_string(&serde_json::json!({
-            "id": self.id,
-            "label": self.label,
-            "omega": self.omega,
-            "learning": self.learning,
-            "exploration": self.exploration,
-            "cohesion": self.cohesion,
-            "friction": self.friction,
-            "disruption": self.disruption,
-            "intention": self.intention,
-            "stability": self.stability,
-            "policy": self.policy,
-            "coherence": self.coherence,
-            "memory": self.memory,
-            "capacity": self.capacity,
-            "utilization": self.utilization,
-            "bandwidth": self.bandwidth,
-            "intensity": self.intensity,
-            "tau": self.tau
-        }))?;
-
-        let mut hasher = Sha256::new();
-        hasher.update(b"zk-canonical-v1:");
-        hasher.update(canonical_payload.as_bytes());
-        let digest = format!("{:x}", hasher.finalize());
-
-        Ok(SerializedNodeEnvelope {
-            codec: "zk-canonical-v1".to_string(),
-            schema_version: 1,
-            payload: self.clone(),
-            digest,
-        })
+    /// The mesh's built-in decision head.
+    ///
+    /// Eight inputs — the canonical mesh feature layout, four mesh summary statistics
+    /// followed by four task statistics — and four outputs, one logit per control
+    /// action. Any model bound to the mesh must honour this contract.
+    pub fn native_default() -> Self {
+        Self::new("hamns-native", "2.0.0", 8, 12, 4)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SerializedNodeEnvelope {
-    pub codec: String,
-    pub schema_version: u32,
-    pub payload: AgenticNodeData,
-    pub digest: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MeshState {
-    pub nodes: Vec<AgenticNodeData>,
-    pub edges: Vec<MeshEdge>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MeshEdge {
-    pub from: String,
-    pub to: String,
-    pub weight: f64,
-    pub signal: f64,
-    pub energy: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MeshStepResult {
-    pub step_index: usize,
-    pub nodes: Vec<AgenticNodeData>,
-    pub edges: Vec<MeshEdge>,
-    pub aggregate_influence: f64,
-    pub pressure: f64,
-    pub digest: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MeshSimulation {
-    pub request_id: String,
-    pub steps: Vec<MeshStepResult>,
-    pub final_pressure: f64,
-    pub final_aggregate_influence: f64,
-    pub final_digest: String,
+/// Clamp helper used across the equation set.
+pub fn unit(value: f64) -> f64 {
+    if value.is_nan() {
+        return 0.0;
+    }
+    value.clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -226,21 +105,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn memory_graph_tracks_nodes_and_edges() {
-        let mut graph = MemoryGraph::default();
-        graph.add_edge("signal", "policy");
-        assert!(graph.nodes.contains(&"signal".to_string()));
-        assert!(graph.nodes.contains(&"policy".to_string()));
-        assert!(graph.edges.contains(&("signal".to_string(), "policy".to_string())));
+    fn unit_clamps_and_absorbs_nan() {
+        assert_eq!(unit(1.4), 1.0);
+        assert_eq!(unit(-0.2), 0.0);
+        assert_eq!(unit(f64::NAN), 0.0);
+        assert_eq!(unit(0.5), 0.5);
     }
 
     #[test]
-    fn zk_envelope_is_digest_backed_and_versioned() {
-        let node = AgenticNodeData::new("node-1", "guardian");
-        let envelope = node.to_zk_envelope().unwrap();
-        assert_eq!(envelope.codec, "zk-canonical-v1");
-        assert_eq!(envelope.schema_version, 1);
-        assert!(!envelope.digest.is_empty());
-        assert_eq!(envelope.payload.id, "node-1");
+    fn native_model_spec_matches_the_decision_head() {
+        let spec = ModelSpec::native_default();
+        assert_eq!(spec.input_dim, 8, "four mesh statistics plus four task statistics");
+        assert_eq!(spec.output_dim, 4, "one logit per MeshAction");
     }
 }

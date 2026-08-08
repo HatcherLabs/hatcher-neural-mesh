@@ -6,3 +6,24 @@ members = [
   "crates/hatcher-ux"
 ]
 resolver = "2"
+
+# Shared package metadata. The four crates ship as one system and are versioned in
+# lockstep — a HAMNS release is a release of the whole mesh, and a `hatcher-neural`
+# that does not match its `hatcher-core` is not a supported combination.
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+authors = ["HatcherLabs"]
+license = "MIT"
+repository = "https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh"
+homepage = "https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh"
+# Inherited readme paths resolve from the workspace root, not the member directory.
+readme = "README.md"
+# Verified by compiling each crate against this toolchain, not estimated.
+# `hatcher-ux` overrides this to 1.86 (its warp/tokio tree needs it), and building
+# `hatcher-neural` with `--features onnx` needs 1.91 because tract does.
+rust-version = "1.81"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

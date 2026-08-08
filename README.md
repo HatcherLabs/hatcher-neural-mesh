@@ -1,55 +1,172 @@
-# HatcherLabs Neural Mesh
+# HatcherLabs Agent Mesh Neural System (HAMNS)
 
-A Rust-native, publishable agentic mesh framework for modeling node adaptation, inter-agent coupling, and policy pressure through deterministic equations and digest-backed serialization envelopes.
+A Rust-native agentic mesh: an adaptive, decentralized multi-agent intelligence
+framework where agent capability is multiplicative, collective intelligence is emergent
+rather than aggregate, trust is learned from outcomes, and the whole mesh carries one
+global intelligence state that rises and falls with what it actually accomplishes.
 
-## The mesh thesis
+Ten equations, five layers, one execution loop, and a decision head you can swap for a
+trained ONNX policy.
 
-This project frames agentic behavior as a controllable mesh of stateful nodes and weighted relations. Each node evolves through local adaptation, each edge captures coupling pressure, and the mesh emits a decision signal that can guide orchestration, escalation, or stabilization.
+## The thesis
 
-## Core equations embodied in the runtime
+Most agent frameworks treat a fleet as a list. HAMNS treats it as a graph with dynamics:
 
-The runtime now encodes the following conceptual dynamics as a live simulation loop:
+* **Weaknesses matter.** `A_i = I·S·P·C·M` is a product, so a brilliant model with no
+  memory scores as weak — and the mesh will tell you which factor is capping each agent.
+* **Connection is worth something measurable.** `A = Σ A_i + γ Σ A_i A_j W_ij` separates
+  raw compute from collective intelligence, and the second term is zero until agents
+  actually work together.
+* **The graph organizes itself.** Trust rises with successful handoffs and falls with
+  failures; connection strength follows trust but pays for latency. Unreliable agents
+  drift into isolation, reliable ones become hubs, unused links wither.
+* **Scheduling is derived, not configured.** Priority balances uncertainty, budget,
+  implementation cost, urgency, and the mesh's confidence *in that specific domain*.
+* **Every run changes the mesh.** The mesh that ran your last task is not the one that
+  will run the next.
 
-- State evolution:
-  $\Omega_{t+1} = \Omega_t + \alpha(L + E + C) - \beta(F + D)$
-- Node influence:
-  $A_i = I_i \times S_i \times P_i \times C_i \times M_i$
-- Aggregate influence:
-  $A = \sum_i A_i + \gamma \sum_{i \ne j}(A_i A_j W_{ij})$
-- Link adaptation:
-  $T_{ij}(t+1) = T_{ij}(t) + \lambda S_{ij} - \mu E_{ij}$
-- Pressure / capacity ratio:
-  $P = \frac{C + \tau}{U \times B \times I}$
+## The ten equations
 
-These become a practical lifecycle:
-1. Initialize node state from request features.
-2. Evolve each node through local adaptation and coupling.
-3. Recalculate edge signals and aggregate influence.
-4. Serialize the resulting state into a zk-style digest envelope.
-5. Emit a decision signal and pressure score for the next control action.
+```text
+1.  Global intelligence   Ω(t+1) = Ω(t) + α(L + E + C) − β(F + D)
+2.  Agent capability      A_i    = I_i · S_i · P_i · C_i · M_i
+3.  Mesh intelligence     A      = Σ A_i + γ Σ_{i≠j} A_i A_j W_ij
+4.  Trust evolution       T_ij(t+1) = T_ij(t) + λ S_ij − μ E_ij
+5.  Priority              P      = (U · B · I · urgency) / (C + τ)
+6.  Memory evolution      M_i(t+1) = M_i(t) + η K_i − δ R_i
+7.  Confidence            C_i(t+1) = C_i(t) + σ·success − ρ·error
+8.  Specialization        S_i(t+1) = S_i(t) + κ·experience − ω·obsolescence
+9.  Network plasticity    W_ij(t+1) = W_ij(t) + φ T_ij (1 − W_ij) − ψ·latency
+10. Resource ratio        R_i    = P_i / (Energy_i + Latency_i)
+```
 
-## Architecture
+[`docs/hamns.md`](docs/hamns.md) is the full specification: what every variable is
+measured from in software, where each equation lives in the code, and the two places
+this implementation deliberately refines the stated rules (and why).
 
-- Core crate: shared contracts, serialization types, and mesh state payloads.
-- Neural crate: the engine that evolves node state and edge coupling.
-- Playground crate: rehearsal and battle-style simulation loops.
-- UX crate: interactive terminal demonstration of the mesh runtime.
+## The pipeline
 
-## What is included
+```text
+Incoming Task → Task Parser → Priority Engine → Planner
+                                                  ├── Research
+                                                  └── Coding
+                                                       ↓
+                                                    Critic → Verifier
+                                                       ↓
+                              Memory Update → Trust Update → Ω Update
+```
 
-- A typed mesh contract layer in the core crate.
-- Deterministic agentic node serialization with a digest-backed envelope.
-- A neural engine that evolves agent nodes through multi-step mesh simulation.
-- A playground for rehearsal and battle-style simulations.
-- A terminal UX for demonstrating the mesh interactively.
+Ten stations. Five are staffed by agents chosen by the router; five are mesh
+bookkeeping. Each pass returns a sealed `PipelineTrace` — the priority score, every
+assignment, every stage record, the measured `Ω` terms, the decision, and a digest.
+
+Outcomes are drawn from a hash of `(task id, agent id, stage, sequence)`, never a clock
+or an RNG, so a run replays exactly. That is what makes rehearsal meaningful and lets a
+trace digest be an attestation rather than a souvenir.
 
 ## Quick start
 
 ```bash
-cargo test
-cargo run -p hatcher-ux
+cargo test                    # 150+ tests across the workspace
+cargo run -p hatcher-ux       # interactive console
 ```
 
-## Publishability notes
+In the console:
 
-The workspace is structured around crate-level metadata, semantic versioning, and a clear API surface so it can be published to crates.io with documentation and examples.
+```text
+run        submit one task through the full pipeline
+scenario   run a 24-task batch (rehearsal | stress | frontier)
+battle     compare coefficient tunings over identical work
+overview   agent roster, capability bottlenecks, hubs, isolated agents
+trust      the trust matrix and strongest collaborations
+omega      the Ω ledger with its L, E, C, F, D terms
+logs       recent pipeline traces
+api        start the HTTP API for the Hatcher frontend
+```
+
+As a library:
+
+```rust
+use hatcher_core::TaskSpec;
+use hatcher_neural::{pipeline, NeuralMesh};
+
+let mut mesh = NeuralMesh::default();
+let task = TaskSpec::new("task-1", "ship the router", "rust")
+    .with_features(vec![0.3, 0.7, 0.2, 0.9])
+    .parsed_from_features();
+
+let trace = pipeline::run(&mut mesh, &task);
+println!("{} → Ω {:.3}", trace.decision.action, trace.omega_after);
+```
+
+Run it a few dozen times and the interesting part shows up: hubs form, unreliable agents
+stop receiving work, and `Ω` compounds or erodes depending on whether the cohort is
+actually good enough for the work it is being given.
+
+## Frontend integration
+
+The mesh runs as an intelligence sidecar to
+[`hatcher-host-frontend`](https://github.com/HatcherLabs/hatcher-host-frontend). That app
+is a Next.js dashboard that talks to its backend only through `lib/api.ts` and renders an
+agent across thirteen tabs, so the endpoints map onto the tabs that are about
+intelligence:
+
+| Frontend tab | Endpoint |
+|---|---|
+| Overview | `GET /api/mesh/overview` |
+| Config | `GET` / `PUT /api/mesh/config` |
+| Analytics | `GET /api/mesh/analytics` |
+| Logs | `GET /api/mesh/logs` |
+| Workflows / Chat | `POST /api/tasks` |
+| Versions / audit | `GET /api/tasks/{id}` (full sealed trace) |
+| — | `GET /api/mesh/graph`, `/api/mesh/trust`, `/api/mesh/agents`, `/api/mesh/memory` |
+
+```bash
+HATCHER_MESH_PORT=3030 cargo run -p hatcher-ux -- serve
+```
+
+The frontend's own backend stays at `:3001`; this listens on `HATCHER_MESH_PORT`
+(default `3030`). Set `HATCHER_MESH_ALLOWED_ORIGIN` to lock CORS down before exposing it
+past localhost. Coefficient writes are validated, so a bad tuning gets a `400` instead of
+quietly making the mesh diverge.
+
+## ONNX decision heads
+
+The equations govern the graph; the decision head governs which of four control actions
+(`observe`, `delegate`, `stabilize`, `escalate`) goes back to Hatcher. It ships as a
+small built-in network and can be replaced with a trained ONNX policy:
+
+```bash
+python scripts/export_policy_onnx.py          # export a conforming model
+cargo test -p hatcher-neural --features onnx  # exercise it
+HATCHER_MESH_MODEL=models/policy.onnx cargo run -p hatcher-ux --features onnx
+```
+
+Inference runs on [tract](https://github.com/sonos/tract), which is pure Rust — enabling
+the feature adds no native ONNX Runtime library to ship or version-match. Loading binds
+the input shape, optimizes the graph, and runs a probe pass, so a broken policy fails at
+startup rather than on the first real request. A failed load degrades to the built-in
+head and says why, instead of leaving the mesh unable to decide anything.
+
+The head proposes; the mesh disposes: a model is never allowed to claim `stabilize` on
+work that failed verification, and high-priority unverified work always escalates to a
+human. See [`docs/onnx.md`](docs/onnx.md) for the model contract.
+
+## Workspace
+
+| Crate | Role |
+|---|---|
+| `hatcher-core` | Typed contracts, digest-backed envelopes, frontend read models |
+| `hatcher-neural` | The ten equations, trust graph, message passing, router, pipeline, inference |
+| `hatcher-playground` | Scenarios, cohorts, coefficient battles |
+| `hatcher-ux` | Terminal console and the HTTP API |
+
+## Docs
+
+* [`docs/hamns.md`](docs/hamns.md) — the full specification
+* [`docs/architecture.md`](docs/architecture.md) — how the layers fit together
+* [`docs/onnx.md`](docs/onnx.md) — decision-head model contract
+
+## License
+
+MIT

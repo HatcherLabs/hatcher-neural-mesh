@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------------------
+# Rust / Cargo
+# ---------------------------------------------------------------------------
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+# Cargo.lock is intentionally tracked: this workspace ships a binary (hatcher-ux).
+
+# ---------------------------------------------------------------------------
+# ONNX model artifacts and runtime binaries
+# ---------------------------------------------------------------------------
+# Model weights are large and are fetched or trained, not committed. Keep the
+# directory itself and any checked-in fixtures under models/fixtures/.
+/models/*
+!/models/.gitkeep
+!/models/README.md
+!/models/fixtures/
+*.onnx
+*.onnx.data
+*.ort
+!models/fixtures/*.onnx
+# ONNX Runtime shared libraries pulled in by the `onnx` feature.
+onnxruntime*.dll
+libonnxruntime*.so*
+libonnxruntime*.dylib
+/.onnxruntime/
+
+# ---------------------------------------------------------------------------
+# Node / Next.js (hatcher-host-frontend integration surface)
+# ---------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+.turbo/
+dist/
+build/
+*.tsbuildinfo
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+# ---------------------------------------------------------------------------
+# Environment and secrets — never commit Hatcher tokens or BYOK API keys
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets.json
+.hatcher/credentials
+
+# ---------------------------------------------------------------------------
+# Mesh runtime output: traces, ledgers, digests, snapshots
+# ---------------------------------------------------------------------------
+/runs/
+/traces/
+/snapshots/
+*.trace.json
+*.ledger.json
+mesh-state-*.json
+
+# ---------------------------------------------------------------------------
+# Logs, coverage, profiling
+# ---------------------------------------------------------------------------
+*.log
+/coverage/
+tarpaulin-report.*
+lcov.info
+perf.data*
+flamegraph.svg
+*.profraw
+
+# ---------------------------------------------------------------------------
+# Editors and OS noise
+# ---------------------------------------------------------------------------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
