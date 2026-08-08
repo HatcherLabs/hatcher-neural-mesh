@@ -67,9 +67,36 @@ trace digest be an attestation rather than a souvenir.
 ## Quick start
 
 ```bash
-cargo test                    # 150+ tests across the workspace
-cargo run -p hatcher-ux       # interactive console
+cargo test                      # 199 tests across the workspace
+cargo run -p hatcher-ux         # interactive console
+cargo run -p hatcher-terminal   # the live 3D observatory
 ```
+
+### The observatory
+
+`hatcher-terminal` links every crate in the mesh and renders a *running* mesh as
+animated 3D ANSI — the frames are real observations taken after real pipeline work,
+not a canned animation.
+
+```bash
+cargo run -p hatcher-terminal                              # full dashboard
+cargo run -p hatcher-terminal -- --view tornado            # the vortex, full screen
+cargo run -p hatcher-terminal -- --scenario frontier       # watch Ω erode
+cargo run -p hatcher-terminal -- --once --plain            # one frame to stdout
+```
+
+| View | What it answers |
+|---|---|
+| `tornado` | Is the mesh live, and which agents are carrying it? |
+| `graph` | Who is connected to whom, and how strongly? |
+| `equations` | What are all ten update rules doing right now? |
+| `dashboard` | All of the above, plus the roster and trust matrix |
+
+The tornado is the headline, and it is driven by mesh state rather than decoration:
+radius is inverse capability, so strong agents are drawn to the axis; height is trust
+standing; angular speed is live activation; and the funnel's amplitude tracks `Ω`. A
+mesh that is genuinely working spins up a tall, fast, bright vortex — one that is
+stalling flattens toward a slow, dim ring.
 
 In the console:
 
@@ -160,6 +187,7 @@ human. See [`docs/onnx.md`](docs/onnx.md) for the model contract.
 | `hatcher-neural` | The ten equations, trust graph, message passing, router, pipeline, inference |
 | `hatcher-playground` | Scenarios, cohorts, coefficient battles |
 | `hatcher-ux` | Terminal console and the HTTP API |
+| `hatcher-terminal` | The observatory: 3D ANSI node graphs, live equations, and the active-node tornado |
 
 ## Docs
 

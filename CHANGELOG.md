@@ -1,8 +1,37 @@
 # Changelog
 
-All four crates are versioned in lockstep: a HAMNS release is a release of the whole
+All crates are versioned in lockstep: a HAMNS release is a release of the whole
 mesh. This project follows [Semantic Versioning](https://semver.org); while the major
 version is `0`, breaking changes bump the minor version.
+
+## [0.23.0] — 2026-08-08
+
+Ships `hatcher-terminal`, the observatory — the mesh becomes something you watch rather
+than something you read logs about.
+
+### Added
+
+- **`hatcher-terminal`**, a fifth crate that links the whole mesh (`hatcher-core`,
+  `hatcher-neural`, `hatcher-playground`) and renders a live one as animated 3D ANSI.
+  The binary runs real work through the ten-stage pipeline every frame, so what is on
+  screen is measured mesh state, not an animation loop.
+- **Active node tornado** — the cohort spun up into a 3D vortex whose geometry is read
+  from mesh state: radius is inverse capability (strong agents pull to the axis), height
+  is trust standing, angular speed is live activation, and funnel amplitude tracks `Ω`.
+  An idle mesh decays to a slow dim ring; only an executing mesh spins up.
+- **Node graph view** — agents placed on a Fibonacci sphere with trust-weighted edges,
+  under an orbiting camera.
+- **Trust matrix, equations, pipeline, and roster panels** — all ten update rules shown
+  live as labelled meters beside the stage-by-stage trace of the last task.
+- **A depth-buffered ANSI canvas** with clip regions, truecolor output, and a plain-text
+  mode, so the entire view layer is unit-testable without a terminal.
+- `--view`, `--scenario`, `--size`, `--frames`, `--fps`, `--spin`, `--once`, and
+  `--plain` on the `hatcher-terminal` binary.
+
+### Changed
+
+- The workspace moves to `0.23.0`; all five crates are pinned in lockstep as before.
+- `README` documents the observatory and the workspace gains a fifth crate row.
 
 ## [0.2.0] — 2026-08-08
 

@@ -3,7 +3,8 @@ members = [
   "crates/hatcher-core",
   "crates/hatcher-neural",
   "crates/hatcher-playground",
-  "crates/hatcher-ux"
+  "crates/hatcher-ux",
+  "crates/hatcher-terminal"
 ]
 resolver = "2"
 
@@ -11,7 +12,7 @@ resolver = "2"
 # lockstep — a HAMNS release is a release of the whole mesh, and a `hatcher-neural`
 # that does not match its `hatcher-core` is not a supported combination.
 [workspace.package]
-version = "0.2.0"
+version = "0.23.0"
 edition = "2021"
 authors = ["HatcherLabs"]
 license = "MIT"
