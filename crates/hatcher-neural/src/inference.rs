@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn native_backend_responds_to_its_input() {
         let backend = NativeBackend::default();
-        let calm = backend.forward(&vec![0.0; 8]).unwrap();
+        let calm = backend.forward(&[0.0; 8]).unwrap();
         let loud = backend.forward(&[1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]).unwrap();
         assert_ne!(calm, loud, "the head must actually depend on features");
     }

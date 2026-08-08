@@ -7,8 +7,8 @@
 use hatcher_core::PipelineStage;
 
 use crate::canvas::Canvas;
-use crate::observe::Observation;
-use crate::space::{Camera, Vec3};
+use crate::observe::{AgentView, Observation};
+use crate::space::{Camera, Projected, Vec3};
 use crate::theme::{self, Rgb};
 
 /// A rectangle of canvas, in cells.
@@ -59,13 +59,27 @@ pub fn node_graph(canvas: &mut Canvas, rect: Rect, observation: &Observation, ca
     let count = observation.agents.len();
     let positions: Vec<Vec3> = (0..count).map(|index| fibonacci_sphere(index, count, 3.1)).collect();
 
+    // `W_ij` grows by saturating increments and spends the mesh's whole working
+    // life well below `1.0` — a fresh cohort sits near `0.1` and a settled one
+    // rarely passes `0.4`. Judging edges against an absolute cutoff therefore
+    // draws either all of them or, for any threshold high enough to prune,
+    // none. Rank each edge against the strongest link currently in the graph
+    // instead: the panel shows the mesh's own backbone at any stage of its
+    // development, and keeps pruning as the graph organizes itself.
+    let peak = observation.edges.iter().map(|edge| edge.weight).fold(0.0_f64, f64::max);
+
     // Edges first, so nodes always sit on top of their own connections.
     for edge in &observation.edges {
         let (Some(from), Some(to)) = (index_of(observation, &edge.from), index_of(observation, &edge.to)) else {
             continue;
         };
+        // `from >= to` drops the mirrored half of a symmetric graph.
+        if from >= to || peak <= f64::EPSILON {
+            continue;
+        }
         // Only the meaningful half of a dense graph, or the panel is a solid block.
-        if edge.weight < 0.35 || from >= to {
+        let strength = (edge.weight / peak).clamp(0.0, 1.0);
+        if strength < 0.45 {
             continue;
         }
         let (Some(a), Some(b)) = (
@@ -76,19 +90,32 @@ pub fn node_graph(canvas: &mut Canvas, rect: Rect, observation: &Observation, ca
         };
 
         let depth = (a.depth + b.depth) * 0.5;
-        let colour = theme::trust_ramp(edge.trust).dim((0.35 + edge.weight * 0.65).clamp(0.0, 1.0));
-        let ch = if edge.weight > 0.75 { '═' } else { '·' };
+        let colour = theme::trust_ramp(edge.trust).dim((0.35 + strength * 0.65).clamp(0.0, 1.0));
+        let ch = if strength > 0.75 { '═' } else { '·' };
         canvas.line(a.x, a.y, b.x, b.y, ch, colour, depth);
     }
 
-    for (index, agent) in observation.agents.iter().enumerate() {
-        let Some(p) = camera.project(positions[index], cx, cy) else {
-            continue;
-        };
+    let mut projected: Vec<(Projected, &AgentView)> = observation
+        .agents
+        .iter()
+        .enumerate()
+        .filter_map(|(index, agent)| Some((camera.project(positions[index], cx, cy)?, agent)))
+        .collect();
+
+    for (p, agent) in &projected {
         let colour = theme::heat(agent.capability_norm).dim((p.scale * 1.8).clamp(0.4, 1.0));
         let marker = if agent.activation > 0.6 { '◉' } else { '◎' };
         canvas.put_depth(p.x, p.y, marker, colour, p.depth - 0.01);
-        canvas.text_clipped(p.x + 2, p.y, &agent.role, theme::LABEL, 9);
+    }
+
+    // Labels last, nearest first. `text_label` claims its span atomically, so the
+    // near label has to be placed before a far one can be told it has lost.
+    projected.sort_by(|(a, _), (b, _)| a.depth.total_cmp(&b.depth));
+    for (p, agent) in &projected {
+        // Ahead of the edges so connections never cut a name into fragments, but
+        // still ordered by the node's own distance so a near label wins the cell.
+        let label_depth = p.depth - Canvas::LABEL_DEPTH_BIAS;
+        canvas.text_label(p.x + 2, p.y, &agent.role, theme::LABEL, 9, label_depth);
     }
 
     canvas.restore_clip(clip);
@@ -186,7 +213,7 @@ pub fn equations(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
     let rows: [(&str, f64, &str); 10] = [
         ("1 Ω  global", observation.omega_norm(), "Ω+α(L+E+C)−β(F+D)"),
         ("2 A_i capability", mean_capability, "I·S·P·C·M"),
-        ("3 A  mesh", observation.emergence_ratio, "ΣA+γΣAAW"),
+        ("3 A  mesh", observation.intelligence_norm(), "ΣA+γΣAAW"),
         ("4 T  trust", observation.mean_trust, "T+λS−μE"),
         ("5 P  priority", (priority / (priority + 1.0)).clamp(0.0, 1.0), "(U·B·I)/(C+τ)"),
         ("6 M  memory", delta.learning.clamp(0.0, 1.0), "M+ηK−δR"),
@@ -404,5 +431,62 @@ mod tests {
     fn rect_inner_never_underflows() {
         let inner = Rect::new(0, 0, 1, 1).inner();
         assert_eq!((inner.w, inner.h), (0, 0));
+    }
+
+    /// Regression: the edge filter used to be an absolute `weight < 0.35`, which
+    /// sits above the entire practical range of `W_ij`, so the graph panel drew
+    /// its nodes and never a single connection between them.
+    #[test]
+    fn the_node_graph_actually_draws_its_edges() {
+        let observation = observation(true);
+        assert!(!observation.edges.is_empty(), "the cohort must be connected");
+
+        let mut canvas = Canvas::new(60, 24);
+        node_graph(&mut canvas, Rect::new(0, 0, 60, 24), &observation, &Camera::default());
+
+        let drawn = canvas.render_plain();
+        let links = drawn.chars().filter(|c| *c == '·' || *c == '═').count();
+        assert!(links > 0, "trust-weighted edges must be visible:\n{drawn}");
+    }
+
+    /// The threshold is relative to the strongest link, so it must still prune:
+    /// a panel that draws every edge of a dense graph is a solid block.
+    #[test]
+    fn the_node_graph_still_prunes_the_weakest_links() {
+        let mut observation = observation(true);
+        for (index, edge) in observation.edges.iter_mut().enumerate() {
+            edge.weight = if index % 2 == 0 { 0.30 } else { 0.02 };
+        }
+
+        let mut canvas = Canvas::new(60, 24);
+        node_graph(&mut canvas, Rect::new(0, 0, 60, 24), &observation, &Camera::default());
+
+        let drawn = canvas.render_plain();
+        assert!(drawn.contains('·') || drawn.contains('═'), "strong links survive");
+        // Every edge surviving would mean the filter had stopped discriminating.
+        let links = drawn.chars().filter(|c| *c == '·' || *c == '═').count();
+        assert!(links < drawn.chars().filter(|c| !c.is_whitespace()).count());
+    }
+
+    /// Regression: row 3 is labelled `A` with the formula `ΣA+γΣAAW`, but plotted
+    /// `emergence_ratio` — a different quantity, already reported as `E` in the
+    /// header, and one that reads near zero while `A` is above 2.
+    #[test]
+    fn the_mesh_intelligence_row_tracks_intelligence_not_emergence() {
+        let mut observation = observation(true);
+        observation.intelligence.raw = 5.0;
+        observation.intelligence.emergent = 0.0;
+        observation.intelligence.total = 5.0;
+        observation.emergence_ratio = 0.0;
+
+        // No emergence at all, but five agents' worth of capability: the meter
+        // must not read empty.
+        assert!(observation.intelligence_norm() > 0.4);
+
+        let mut canvas = Canvas::new(60, 14);
+        equations(&mut canvas, Rect::new(0, 0, 60, 14), &observation);
+        let drawn = canvas.render_plain();
+        assert!(drawn.contains("3 A  mesh"));
+        assert!(!drawn.contains("3 A  mesh        0.00"), "must not plot the ratio:\n{drawn}");
     }
 }

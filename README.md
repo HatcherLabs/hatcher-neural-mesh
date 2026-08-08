@@ -67,7 +67,7 @@ trace digest be an attestation rather than a souvenir.
 ## Quick start
 
 ```bash
-cargo test                      # 199 tests across the workspace
+cargo test                      # 207 tests across the workspace
 cargo run -p hatcher-ux         # interactive console
 cargo run -p hatcher-terminal   # the live 3D observatory
 ```
@@ -77,6 +77,16 @@ cargo run -p hatcher-terminal   # the live 3D observatory
 `hatcher-terminal` links every crate in the mesh and renders a *running* mesh as
 animated 3D ANSI — the frames are real observations taken after real pipeline work,
 not a canned animation.
+
+It also installs as a standalone binary, with no ONNX runtime or terminal backend
+to match against the host:
+
+```bash
+cargo install hatcher-terminal
+hatcher-terminal
+```
+
+From a checkout:
 
 ```bash
 cargo run -p hatcher-terminal                              # full dashboard

@@ -148,18 +148,76 @@ impl Canvas {
     /// Draw a string only where it fits within `max_width` columns, truncating
     /// with an ellipsis rather than spilling into the neighbouring panel.
     pub fn text_clipped(&mut self, x: i64, y: i64, s: &str, fg: Rgb, max_width: usize) {
+        self.text_clipped_depth(x, y, s, fg, max_width, f64::NEG_INFINITY);
+    }
+
+    /// Shift applied to a label's depth so it layers as an annotation.
+    ///
+    /// A label has to resolve against other labels by its node's distance, but it
+    /// must not lose cells to the geometry it is annotating — an edge passing in
+    /// front of a node would otherwise cut the node's name into unreadable
+    /// fragments. Biasing every label forward by the same large constant keeps
+    /// labels ahead of all geometry while preserving their order among themselves.
+    pub const LABEL_DEPTH_BIAS: f64 = 1_000.0;
+
+    /// Draw a node label, or draw nothing at all.
+    ///
+    /// Losing individual cells to a nearer label is worse than losing the whole
+    /// label: two names a few columns apart leave a fragment of the loser welded
+    /// to the winner (`resplanner`), which reads as a third agent that does not
+    /// exist. Claiming the span atomically means an occluded label simply is not
+    /// there, and the cohort roster panel remains the authority on who is present.
+    ///
+    /// Returns whether the label was drawn.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_label(&mut self, x: i64, y: i64, s: &str, fg: Rgb, max_width: usize, depth: f64) -> bool {
+        if max_width == 0 || depth.is_nan() {
+            return false;
+        }
+        let span = s.chars().count().min(max_width) as i64;
+        // Cells off the canvas or outside the clip are not contested — they are
+        // simply never drawn — so only drawable cells get a say.
+        let contested = (0..span).any(|offset| {
+            let (cell_x, cell_y) = (x + offset, y);
+            if cell_x < 0 || cell_y < 0 || !self.in_clip(cell_x, cell_y) {
+                return false;
+            }
+            match self.index(cell_x as usize, cell_y as usize) {
+                Some(index) => depth > self.cells[index].depth,
+                None => false,
+            }
+        });
+        if contested {
+            return false;
+        }
+        self.text_clipped_depth(x, y, s, fg, max_width, depth);
+        true
+    }
+
+    /// [`text_clipped`](Self::text_clipped), but honouring the depth buffer.
+    ///
+    /// Labels attached to projected geometry have to compete for cells like the
+    /// geometry does. Drawn at the front of the buffer they resolve by draw
+    /// order instead, so whichever agent happens to be iterated last paints over
+    /// its neighbours — a node on the far side of the funnel erases the label of
+    /// one in front of it. Passing the node's own depth makes the nearer label win.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_clipped_depth(&mut self, x: i64, y: i64, s: &str, fg: Rgb, max_width: usize, depth: f64) {
         if max_width == 0 {
             return;
         }
         let count = s.chars().count();
-        if count <= max_width {
-            self.text(x, y, s, fg);
-            return;
+        let keep = if count <= max_width {
+            count
+        } else {
+            max_width.saturating_sub(1)
+        };
+        for (offset, ch) in s.chars().take(keep).enumerate() {
+            self.put_depth(x + offset as i64, y, ch, fg, depth);
         }
-        let keep = max_width.saturating_sub(1);
-        let truncated: String = s.chars().take(keep).collect();
-        self.text(x, y, &truncated, fg);
-        self.put(x + keep as i64, y, '…', fg);
+        if count > max_width {
+            self.put_depth(x + keep as i64, y, '…', fg, depth);
+        }
     }
 
     /// Bresenham line from `(x0, y0)` to `(x1, y1)` at a constant depth.
@@ -359,5 +417,71 @@ mod tests {
         canvas.clear();
         canvas.text(0, 0, "zzzzzz", theme::TEXT);
         assert_eq!(canvas.render_plain(), "zzzzzz", "clear resets the clip");
+    }
+
+    /// Regression: node labels went through `text`, which draws at the front of
+    /// the buffer, so the last agent iterated painted over every label before it
+    /// regardless of which node was actually nearer the camera.
+    #[test]
+    fn depth_text_lets_the_nearer_label_win() {
+        let mut canvas = Canvas::new(8, 1);
+        canvas.text_clipped_depth(0, 0, "far", theme::TEXT, 8, 9.0);
+        canvas.text_clipped_depth(0, 0, "near", theme::TEXT, 8, 2.0);
+        assert_eq!(canvas.render_plain(), "near    ");
+
+        // ...and drawing the far label second must not undo that.
+        canvas.clear();
+        canvas.text_clipped_depth(0, 0, "near", theme::TEXT, 8, 2.0);
+        canvas.text_clipped_depth(0, 0, "far", theme::TEXT, 8, 9.0);
+        assert_eq!(canvas.render_plain(), "near    ");
+    }
+
+    /// The bias has to clear ordinary scene depth, or an edge drawn in front of a
+    /// node still shreds that node's label.
+    #[test]
+    fn biased_labels_beat_geometry_but_keep_their_own_order() {
+        let mut canvas = Canvas::new(8, 1);
+        // A near edge at depth 1.0 against a label belonging to a far node.
+        canvas.text_clipped_depth(0, 0, "near", theme::TEXT, 8, 40.0 - Canvas::LABEL_DEPTH_BIAS);
+        canvas.put_depth(0, 0, '═', theme::TEXT, 1.0);
+        assert_eq!(canvas.render_plain(), "near    ", "geometry must not overwrite a label");
+
+        canvas.clear();
+        canvas.text_clipped_depth(0, 0, "far", theme::TEXT, 8, 40.0 - Canvas::LABEL_DEPTH_BIAS);
+        canvas.text_clipped_depth(0, 0, "nearer", theme::TEXT, 8, 2.0 - Canvas::LABEL_DEPTH_BIAS);
+        assert_eq!(canvas.render_plain(), "nearer  ", "labels still order among themselves");
+    }
+
+    /// Regression: two overlapping labels used to leave a fragment of the loser
+    /// welded to the winner — `researcher` behind `planner` rendered `resplanner`.
+    #[test]
+    fn an_occluded_label_is_dropped_whole_rather_than_fragmented() {
+        let mut canvas = Canvas::new(20, 1);
+        // Nearest first, which is the order the draw sites use.
+        assert!(canvas.text_label(3, 0, "planner", theme::TEXT, 10, 2.0 - Canvas::LABEL_DEPTH_BIAS));
+        assert!(!canvas.text_label(0, 0, "researcher", theme::TEXT, 10, 9.0 - Canvas::LABEL_DEPTH_BIAS));
+
+        let drawn = canvas.render_plain();
+        assert!(!drawn.contains("resplanner"), "no welded fragment: {drawn}");
+        assert_eq!(drawn.trim_end(), "   planner");
+    }
+
+    #[test]
+    fn labels_that_do_not_collide_are_all_drawn() {
+        let mut canvas = Canvas::new(24, 1);
+        assert!(canvas.text_label(0, 0, "alpha", theme::TEXT, 10, 2.0 - Canvas::LABEL_DEPTH_BIAS));
+        assert!(canvas.text_label(12, 0, "beta", theme::TEXT, 10, 9.0 - Canvas::LABEL_DEPTH_BIAS));
+        assert_eq!(canvas.render_plain().trim_end(), "alpha       beta");
+    }
+
+    #[test]
+    fn depth_text_clips_like_its_front_buffer_twin() {
+        let mut canvas = Canvas::new(10, 1);
+        canvas.text_clipped_depth(0, 0, "abcdefghijklm", theme::TEXT, 5, 1.0);
+        assert_eq!(canvas.render_plain(), "abcd…     ");
+
+        canvas.clear();
+        canvas.text_clipped_depth(0, 0, "abc", theme::TEXT, 0, 1.0);
+        assert_eq!(canvas.render_plain(), "          ", "zero width draws nothing");
     }
 }

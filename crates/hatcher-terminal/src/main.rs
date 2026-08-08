@@ -165,6 +165,14 @@ fn main() {
 fn run(options: Options) -> io::Result<()> {
     let mut mesh = NeuralMesh::default();
     let batch: Vec<TaskSpec> = options.scenario.task_batch();
+    // `.max(1)` on the modulus below keeps the division safe but would still index
+    // an empty vector; refuse the scenario here rather than panic mid-frame.
+    if batch.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "scenario produced no tasks: nothing to observe",
+        ));
+    }
     let mut canvas = Canvas::new(options.width, options.height);
     let mut camera = Camera::default();
 
@@ -185,7 +193,7 @@ fn run(options: Options) -> io::Result<()> {
         // Feed the mesh real work: one task per frame, cycled through the batch.
         // This is what makes "active" mean something — the tornado is reacting to
         // the pipeline, not to a timer.
-        let task = &batch[(frame as usize) % batch.len().max(1)];
+        let task = &batch[(frame as usize) % batch.len()];
         last_trace = Some(pipeline::run(&mut mesh, task));
         let active = true;
 

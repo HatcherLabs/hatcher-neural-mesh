@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(deterministic_unit(seed_of("task-1")), deterministic_unit(seed_of("task-1")));
         assert_ne!(deterministic_unit(seed_of("task-1")), deterministic_unit(seed_of("task-2")));
 
-        let mean = (0..1000).map(|i| deterministic_unit(i)).sum::<f64>() / 1000.0;
+        let mean = (0..1000).map(deterministic_unit).sum::<f64>() / 1000.0;
         assert!((mean - 0.5).abs() < 0.05, "draws should be roughly uniform, got mean {mean}");
         assert!((0..1000).all(|i| (0.0..1.0).contains(&deterministic_unit(i))));
     }

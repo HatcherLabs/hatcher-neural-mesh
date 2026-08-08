@@ -139,6 +139,20 @@ impl Observation {
         (omega / (omega + 2.0)).clamp(0.0, 1.0)
     }
 
+    /// Mesh intelligence `A` squashed into `[0, 1]` for display.
+    ///
+    /// Like `Ω`, `A` is unbounded above, so it needs a scale before it can go on
+    /// a meter. The reference point is the cohort itself: `raw` equals the agent
+    /// count when every agent is at full capability, so dividing by `total +
+    /// count` puts a flawless disconnected cohort at exactly one half and leaves
+    /// the upper half of the meter to the emergent term. A mesh that reads above
+    /// `0.5` is worth more than the sum of its agents.
+    pub fn intelligence_norm(&self) -> f64 {
+        let total = self.intelligence.total.max(0.0);
+        let reference = self.agents.len().max(1) as f64;
+        (total / (total + reference)).clamp(0.0, 1.0)
+    }
+
     /// Build the vortex for this observation.
     pub fn tornado(&self) -> Tornado {
         let nodes = self

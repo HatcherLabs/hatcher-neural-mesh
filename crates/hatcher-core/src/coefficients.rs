@@ -203,8 +203,10 @@ mod tests {
 
     #[test]
     fn zero_tau_is_rejected() {
-        let mut coefficients = MeshCoefficients::default();
-        coefficients.tau = 0.0;
+        let coefficients = MeshCoefficients {
+            tau: 0.0,
+            ..MeshCoefficients::default()
+        };
         assert!(matches!(
             coefficients.validate(),
             Err(CoefficientError::TauMustBePositive { .. })
@@ -213,8 +215,10 @@ mod tests {
 
     #[test]
     fn runaway_emergence_is_rejected() {
-        let mut coefficients = MeshCoefficients::default();
-        coefficients.gamma = 0.9;
+        let coefficients = MeshCoefficients {
+            gamma: 0.9,
+            ..MeshCoefficients::default()
+        };
         assert!(matches!(
             coefficients.validate(),
             Err(CoefficientError::EmergenceUnstable { .. })
@@ -223,8 +227,10 @@ mod tests {
 
     #[test]
     fn negative_rates_are_rejected() {
-        let mut coefficients = MeshCoefficients::default();
-        coefficients.lambda = -0.1;
+        let coefficients = MeshCoefficients {
+            lambda: -0.1,
+            ..MeshCoefficients::default()
+        };
         assert!(matches!(
             coefficients.validate(),
             Err(CoefficientError::NonNegativeRate { name: "lambda", .. })

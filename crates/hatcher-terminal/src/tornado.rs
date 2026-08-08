@@ -19,7 +19,7 @@
 //! to a slow, dim ring, and only spins up when work is actually flowing.
 
 use crate::canvas::{Canvas, Viewport};
-use crate::space::{Camera, Vec3};
+use crate::space::{Camera, Projected, Vec3};
 use crate::theme::{self, Rgb};
 
 /// Height of the funnel in world units at unit amplitude.
@@ -194,12 +194,13 @@ impl Tornado {
 
     /// The agents themselves, drawn over the field with their labels.
     fn draw_nodes(&self, canvas: &mut Canvas, camera: &Camera, cx: f64, cy: f64, time: f64) {
-        for node in &self.nodes {
-            let position = self.node_position(node, time);
-            let Some(p) = camera.project(position, cx, cy) else {
-                continue;
-            };
+        let mut projected: Vec<(Projected, &VortexNode)> = self
+            .nodes
+            .iter()
+            .filter_map(|node| Some((camera.project(self.node_position(node, time), cx, cy)?, node)))
+            .collect();
 
+        for (p, node) in &projected {
             let activation = node.activation.clamp(0.0, 1.0);
             let colour: Rgb = theme::heat(activation).dim((p.scale * 1.8).clamp(0.35, 1.0));
             // Hot nodes get a solid marker; quiet ones stay small and unobtrusive.
@@ -211,12 +212,22 @@ impl Tornado {
                 '○'
             };
             canvas.put_depth(p.x, p.y, marker, colour, p.depth - 0.01);
+        }
 
+        // Labels last, nearest first. `text_label` claims its span atomically, so
+        // the near label has to be placed before a far one can be told it has lost.
+        projected.sort_by(|(a, _), (b, _)| a.depth.total_cmp(&b.depth));
+        for (p, node) in &projected {
             // Label only the nodes carrying real signal, or the panel turns to soup.
-            if activation > 0.4 {
-                let label: String = node.label.chars().take(9).collect();
-                canvas.text_clipped(p.x + 2, p.y, &label, theme::LABEL, 10);
+            if node.activation.clamp(0.0, 1.0) <= 0.4 {
+                continue;
             }
+            let label: String = node.label.chars().take(9).collect();
+            // Ahead of the funnel wall so tracers never shred a name, but ordered
+            // by the node's own distance, so a label on the far wall cannot paint
+            // over a node orbiting in front of it.
+            let label_depth = p.depth - Canvas::LABEL_DEPTH_BIAS;
+            canvas.text_label(p.x + 2, p.y, &label, theme::LABEL, 10, label_depth);
         }
     }
 }

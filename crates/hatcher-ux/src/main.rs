@@ -554,8 +554,8 @@ fn command_overview(state: &AppState) {
         overview.active_edge_count
     );
     println!(
-        "{:<14} {:<12} {:>6} {:>6} {:>6} {:>6} {:>5} {:>4}  {}",
-        "agent", "role", "A_i", "conf", "in_T", "R_i", "deg", "att", "bottleneck"
+        "{:<14} {:<12} {:>6} {:>6} {:>6} {:>6} {:>5} {:>4}  bottleneck",
+        "agent", "role", "A_i", "conf", "in_T", "R_i", "deg", "att"
     );
     for agent in &overview.agents {
         println!(

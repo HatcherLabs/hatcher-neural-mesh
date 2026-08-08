@@ -815,10 +815,7 @@ mod tests {
         let clean = execute_stage(&mesh, &assignment, &task("carry"), 1.0, &config);
         let poisoned = execute_stage(&mesh, &assignment, &task("carry"), carry_for(false), &config);
         assert!(poisoned.note.contains("carry=0.55"));
-        assert!(
-            !(poisoned.success && !clean.success),
-            "a poisoned upstream must never help"
-        );
+        assert!(!poisoned.success || clean.success, "a poisoned upstream must never help");
     }
 
     #[test]
