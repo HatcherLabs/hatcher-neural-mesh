@@ -20,9 +20,9 @@ default = []
 onnx = ["hatcher-neural/onnx", "hatcher-playground/onnx"]
 
 [dependencies]
-hatcher-core = { path = "../hatcher-core", version = "0.23.0" }
-hatcher-neural = { path = "../hatcher-neural", version = "0.23.0" }
-hatcher-playground = { path = "../hatcher-playground", version = "0.23.0" }
+hatcher-core = { path = "../hatcher-core", version = "1.0.0" }
+hatcher-neural = { path = "../hatcher-neural", version = "1.0.0" }
+hatcher-playground = { path = "../hatcher-playground", version = "1.0.0" }
 serde.workspace = true
 serde_json.workspace = true
 warp = "0.3"

@@ -5,8 +5,13 @@ framework where agent capability is multiplicative, collective intelligence is e
 rather than aggregate, trust is learned from outcomes, and the whole mesh carries one
 global intelligence state that rises and falls with what it actually accomplishes.
 
-Ten equations, five layers, one execution loop, and a decision head you can swap for a
-trained ONNX policy.
+Ten equations, five layers, one execution loop, a decision head you can swap for a trained
+ONNX policy, and a four-verb integration contract for driving it from a real agent runtime.
+
+**New in 1.0.0:** the mesh no longer has to invent its own outcomes. Register your agents,
+submit a task, receive a routing plan, run it for real, and report back what actually
+happened — success, verifier score, latency, cost, and a classified error. See
+[`docs/adapter.md`](docs/adapter.md).
 
 ## The thesis
 
@@ -64,10 +69,98 @@ Outcomes are drawn from a hash of `(task id, agent id, stage, sequence)`, never 
 or an RNG, so a run replays exactly. That is what makes rehearsal meaningful and lets a
 trace digest be an attestation rather than a souvenir.
 
+## The integration contract
+
+The mesh decides *which* agent should run a stage. It does not execute agents, and it must
+not invent what they did. So a run is a session:
+
+```text
+  1. register   AgentRegistration   →  RegistrationAck
+  2. plan       TaskEnvelope        →  RoutingPlan      ─┐
+                 …you execute for real…                  │  one run,
+  3. report     StageOutcomeReport  →  RunStatus         │  held open
+  4. finalize   run_id              →  MeshReceipt      ─┘
+```
+
+`plan` moves nothing — a mesh that learned from work it merely *scheduled* would be
+learning from its own intentions. Trust, memory, capability, and `Ω` move at `finalize`,
+when the reports are in.
+
+```rust
+use hatcher_core::{StageOutcomeReport, TaskEnvelope};
+use hatcher_neural::MeshAdapter;
+
+let mut adapter = MeshAdapter::new();
+let plan = adapter.plan(&TaskEnvelope::new("harden the settlement path")
+    .with_domain("rust")
+    .with_features(vec![0.35, 0.72, 0.28, 0.64]))?;
+
+for planned in &plan.stages {
+    // …dispatch real work to planned.agent_id, then:
+    adapter.report(&plan.run_id,
+        StageOutcomeReport::success(planned.stage, &planned.agent_id, 0.88)
+            .with_latency_ms(18_400.0)
+            .with_cost(0.21))?;
+}
+
+let receipt = adapter.finalize(&plan.run_id)?;
+assert!(receipt.provenance.is_real());   // this was real work
+```
+
+Three things this contract is careful about, because they are the ones that quietly ruin a
+learning system:
+
+* **A failed stage is not automatically the agent's fault.** Every failure carries an
+  `ErrorClass`, and a rate limit or a provider outage is damped to 35% blame and kept out
+  of the trust ledger entirely. Otherwise the mesh learns to distrust a perfectly good
+  agent because someone else's service was down.
+* **`quality` and `confidence` are different numbers.** One is the reviewer's score, the
+  other is the producer's. Keeping them apart is what lets the mesh notice an agent that is
+  confidently wrong.
+* **Simulated and reported runs can never be confused.** Every trace carries its
+  `OutcomeProvenance`, and it is *inside* the digest — so a rehearsal and a production run
+  over identical outcomes hash differently, and the first can never be presented as the
+  second.
+
+Only reported outcomes teach the mesh what an agent costs. A simulated latency is derived
+from the agent's own profile, so folding it back would be a closed loop that drifts with
+every rehearsal and calls the drift evidence.
+
+[`docs/adapter.md`](docs/adapter.md) is the full contract, including the error-class table,
+the calibration model, and an explicit list of what it does *not* do.
+
+## Does the routing pay for itself?
+
+```bash
+cargo run -p hatcher-playground --example benchmark
+```
+
+On routine work, against a fixed one-agent-per-role assignment — what most agent frameworks
+ship — over 24 identical tasks:
+
+| Policy | Quality | Verified | Cost/verified | p50 latency |
+|---|---|---|---|---|
+| **mesh** | 0.627 | 42% | **3.920** | 89 408 ms |
+| `static-role` (baseline) | 0.617 | 42% | 6.510 | 154 481 ms |
+| `cheapest` | 0.407 | 4% | 7.350 | 20 160 ms |
+
+Same verified rate, **40% less money, 42% less wall-clock time**. `cheapest` is the
+cautionary arm: the lowest cost per task and the *worst* cost per verified task, because
+routing on price alone does not save money, it moves the bill.
+
+The harness also reports where the mesh **loses** — on `frontier`, a domain nobody has
+mastered, it under-provisions and verifies nothing while a fixed assignment manages 4%. That
+result is pinned by a test, so fixing the router forces the documentation to be updated
+rather than letting a stale claim survive. See [`docs/benchmark.md`](docs/benchmark.md).
+
+Point the replay harness at real recorded runs and it scores the mesh's routing against the
+choices that were actually made, without ever seeing your prompts or outputs.
+
 ## Quick start
 
 ```bash
-cargo test                      # 207 tests across the workspace
+cargo test                      # 322 tests across the workspace
+cargo test --features hatcher-neural/onnx   # 334, adding the ONNX decision head
 cargo run -p hatcher-ux         # interactive console
 cargo run -p hatcher-terminal   # the live 3D observatory
 ```
@@ -95,12 +188,30 @@ cargo run -p hatcher-terminal -- --scenario frontier       # watch Ω erode
 cargo run -p hatcher-terminal -- --once --plain            # one frame to stdout
 ```
 
-| View | What it answers |
+| Tab | What it answers |
 |---|---|
+| `dashboard` | All of the below, plus the roster and trust matrix |
 | `tornado` | Is the mesh live, and which agents are carrying it? |
 | `graph` | Who is connected to whom, and how strongly? |
 | `equations` | What are all ten update rules doing right now? |
-| `dashboard` | All of the above, plus the roster and trust matrix |
+| `contract` | What is driving the mesh, and is any of it real? |
+| `benchmark` | Does mesh routing beat a fixed assignment? |
+| `economics` | What does this cohort cost, and how fast is it? |
+
+The last three exist because once something outside the mesh starts driving it, "the
+tornado is spinning" stops being the interesting question. A mesh running entirely on
+declared numbers looks identical to one running on measured ones — so the `contract` tab
+states which it is and what share of the cohort has ever been measured, and `economics`
+marks every unmeasured figure as `declared` rather than letting a guess read as evidence.
+
+```bash
+cargo run -p hatcher-terminal -- --view contract --outcomes reported
+cargo run -p hatcher-terminal -- --view benchmark --benchmark
+```
+
+`--outcomes reported` drives the full integration contract instead of the built-in
+simulator: the observatory plans a run, reports synthesized stage outcomes back, and
+finalizes it. The outcomes are still made up — what is real is the code path.
 
 The tornado is the headline, and it is driven by mesh state rather than decoration:
 radius is inverse capability, so strong agents are drawn to the axis; height is trust
@@ -114,6 +225,9 @@ In the console:
 run        submit one task through the full pipeline
 scenario   run a 24-task batch (rehearsal | stress | frontier)
 battle     compare coefficient tunings over identical work
+contract   drive one task through the integration contract, verb by verb
+bench      mesh routing vs the baselines on quality, cost, latency, reliability
+replay     replay a recording and score the mesh's routing against it
 overview   agent roster, capability bottlenecks, hubs, isolated agents
 trust      the trust matrix and strongest collaborations
 omega      the Ω ledger with its L, E, C, F, D terms
@@ -158,6 +272,18 @@ intelligence:
 | Versions / audit | `GET /api/tasks/{id}` (full sealed trace) |
 | — | `GET /api/mesh/graph`, `/api/mesh/trust`, `/api/mesh/agents`, `/api/mesh/memory` |
 
+The integration contract is served alongside it:
+
+| Verb | Endpoint |
+|---|---|
+| descriptor | `GET /api/contract` |
+| register | `POST /api/mesh/agents` |
+| plan | `POST /api/runs` |
+| report | `POST /api/runs/{id}/outcomes` |
+| finalize | `POST /api/runs/{id}/finalize` |
+| inspect / abandon | `GET /api/runs`, `GET /api/runs/{id}`, `DELETE /api/runs/{id}` |
+| evidence | `GET /api/benchmark`, `POST /api/replay` |
+
 ```bash
 HATCHER_MESH_PORT=3030 cargo run -p hatcher-ux -- serve
 ```
@@ -175,32 +301,54 @@ small built-in network and can be replaced with a trained ONNX policy:
 
 ```bash
 python scripts/export_policy_onnx.py          # export a conforming model
-cargo test -p hatcher-neural --features onnx  # exercise it
+cargo test -p hatcher-neural --features onnx  # 164 tests, 12 of them ONNX
 HATCHER_MESH_MODEL=models/policy.onnx cargo run -p hatcher-ux --features onnx
+cargo run -p hatcher-terminal --features onnx -- --model models/policy.onnx --view contract
 ```
 
 Inference runs on [tract](https://github.com/sonos/tract), which is pure Rust — enabling
 the feature adds no native ONNX Runtime library to ship or version-match. Loading binds
 the input shape, optimizes the graph, and runs a probe pass, so a broken policy fails at
-startup rather than on the first real request. A failed load degrades to the built-in
-head and says why, instead of leaving the mesh unable to decide anything.
+startup rather than on the first real request.
 
 The head proposes; the mesh disposes: a model is never allowed to claim `stabilize` on
 work that failed verification, and high-priority unverified work always escalates to a
 human. See [`docs/onnx.md`](docs/onnx.md) for the model contract.
 
+**The head is part of the contract, not an implementation detail.** Every `MeshReceipt`
+carries a `decision_head` — name, version, dimensions, and a reason if the mesh is not
+running the head it was asked for — and `GET /api/contract` reports it before you send any
+work. **The mesh digest commits to it**, so swapping the policy changes the attestation:
+two meshes with identical nodes and identical trust but different heads return different
+answers, and a commitment that ignored that would attest to state while saying nothing
+about what the state was used to decide.
+
+Where a bad model path *degrades* to the built-in head it always says why — on the receipt,
+in `mesh.degraded()`, and in red on the observatory's `contract` tab. Where you named the
+policy explicitly (`try_with_onnx`, `MeshAdapter::try_with_policy`, `hatcher-terminal
+--model`) it fails instead. Silent fallback is never on offer: it would mean acting on
+decisions from a model you think you replaced.
+
 ## Workspace
 
 | Crate | Role |
 |---|---|
-| `hatcher-core` | Typed contracts, digest-backed envelopes, frontend read models |
-| `hatcher-neural` | The ten equations, trust graph, message passing, router, pipeline, inference |
-| `hatcher-playground` | Scenarios, cohorts, coefficient battles |
+| `hatcher-core` | Typed contracts, the integration contract, digest-backed envelopes, read models |
+| `hatcher-neural` | The ten equations, trust graph, message passing, router, pipeline, inference, the adapter |
+| `hatcher-playground` | Scenarios, cohorts, coefficient battles, the routing benchmark and replay harness |
 | `hatcher-ux` | Terminal console and the HTTP API |
 | `hatcher-terminal` | The observatory: 3D ANSI node graphs, live equations, and the active-node tornado |
 
+A client that only needs the wire types can depend on `hatcher-core` alone.
+
 ## Docs
 
+* [`docs/adapter.md`](docs/adapter.md) — **the integration contract**: the four verbs, the
+  error-class table, calibration, and what it deliberately does not do
+* [`docs/benchmark.md`](docs/benchmark.md) — mesh routing vs. the baselines, with results
+  and the scenario where the mesh loses
+* [`docs/zk.md`](docs/zk.md) — the canonical digest as shipped, and a precise statement of
+  what a ZK proof would prove and when a signature would do instead
 * [`docs/hamns.md`](docs/hamns.md) — the full specification
 * [`docs/architecture.md`](docs/architecture.md) — how the layers fit together
 * [`docs/onnx.md`](docs/onnx.md) — decision-head model contract

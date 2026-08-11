@@ -4,6 +4,18 @@
 //! histories: batches of tasks with controlled difficulty, run against a cohort, with
 //! the resulting structure reported. Nothing here adds new dynamics — it drives
 //! [`hatcher_neural::pipeline`] and reads the mesh's own state back out.
+//!
+//! [`bench`] answers the question the rest of the crate raises: run identical work under
+//! different routing policies and see whether the mesh's routing actually beats a simple
+//! fixed assignment on quality, cost, latency, and reliability — and replay real recorded
+//! runs to check the same thing against what actually happened.
+
+pub mod bench;
+
+pub use bench::{
+    contested_cohort, synthetic_recording, Benchmark, BenchmarkReport, PolicyDelta, PolicyScorecard,
+    RecordedRun, Replay, ReplayReport, RoutingPolicy, StageAgreement,
+};
 
 use hatcher_core::{
     AgentNode, AgentRole, CapabilityVector, ExecutionMode, HatcherRequest, HatcherResponse, MeshCoefficients,

@@ -39,10 +39,12 @@
 //! agents stop receiving work, and `Ω` compounds or erodes depending on whether the
 //! cohort is actually good enough for the work it is being given.
 
+pub mod adapter;
 pub mod equations;
 pub mod inference;
 pub mod learning;
 pub mod mesh;
+pub mod outcomes;
 pub mod pipeline;
 pub mod router;
 pub mod trust;
@@ -50,13 +52,15 @@ pub mod trust;
 #[cfg(feature = "onnx")]
 pub mod onnx;
 
+pub use adapter::{MeshAdapter, RunStatus};
 pub use equations::{OMEGA_CEILING, OMEGA_FLOOR};
 pub use inference::{
     BackendKind, Decision, InferenceBackend, InferenceError, NativeBackend, SharedBackend,
 };
 pub use learning::StageOutcome;
 pub use mesh::{default_cohort, NeuralMesh, MESSAGE_ROUNDS};
-pub use pipeline::{run, run_batch, run_with, PipelineConfig};
+pub use outcomes::{MissingOutcome, OutcomeSource, ReportedOutcomes, ResolvedOutcome, SimulatedOutcomes, StageContext};
+pub use pipeline::{run, run_batch, run_bound, run_with, run_with_outcomes, PipelineConfig, RunInputs};
 pub use router::{rank, score_candidate, select};
 pub use trust::{TrustGraph, TrustSettlement};
 

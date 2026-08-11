@@ -5,8 +5,12 @@
 //! so a panel cannot accidentally divide by a zero cohort or plot a raw `Ω` on a
 //! `[0, 1]` axis, and the whole view layer is testable without a mesh.
 
-use hatcher_core::{MeshEdge, MeshIntelligence, PipelineTrace};
-use hatcher_neural::NeuralMesh;
+use hatcher_core::{
+    DecisionHead, MeshEdge, MeshIntelligence, OutcomeProvenance, PipelineTrace, RuntimeCalibration,
+    CONTRACT_VERSION,
+};
+use hatcher_neural::{router, NeuralMesh};
+use hatcher_playground::BenchmarkReport;
 
 use crate::tornado::{Tornado, VortexNode};
 
@@ -29,6 +33,15 @@ pub struct AgentView {
     pub successes: u64,
     pub failures: u64,
     pub last_action: Option<String>,
+    /// `R_i = P_i / (Energy_i + Latency_i)`.
+    pub efficiency: f64,
+    /// What the mesh expects a stage by this agent to take, in milliseconds.
+    pub expected_latency_ms: f64,
+    /// What it expects a stage to cost, in the caller's cost units.
+    pub expected_cost: f64,
+    /// How many real outcome reports have landed on this agent. Zero means every
+    /// number above it is still a declaration rather than a measurement.
+    pub observations: u64,
 }
 
 impl AgentView {
@@ -38,6 +51,11 @@ impl AgentView {
             return None;
         }
         Some(self.successes as f64 / self.attempts as f64)
+    }
+
+    /// Whether this agent's cost and latency are measured or merely declared.
+    pub fn is_measured(&self) -> bool {
+        self.observations > 0
     }
 }
 
@@ -58,6 +76,22 @@ pub struct Observation {
     pub last_trace: Option<PipelineTrace>,
     /// Whether work is currently flowing through the mesh.
     pub active: bool,
+
+    // --- the integration surface -------------------------------------------
+    /// Version of the contract this mesh speaks.
+    pub contract_version: &'static str,
+    /// Commitment over the whole mesh right now.
+    pub mesh_digest: String,
+    /// How the mesh normalizes reported milliseconds and cost units.
+    pub calibration: RuntimeCalibration,
+    /// Which model is deciding, and whether it is the one that was asked for.
+    pub head: DecisionHead,
+    /// Runs planned but not yet finalized.
+    pub open_runs: usize,
+    /// The benchmark, when one has been run. Computed once and carried, because
+    /// re-running six policies over a full batch every frame would make the
+    /// observatory a benchmark harness with a display attached.
+    pub benchmark: Option<BenchmarkReport>,
 }
 
 /// Rescale a slice into `[0, 1]` against its own maximum.
@@ -75,6 +109,21 @@ fn normalize(values: &[f64]) -> Vec<f64> {
 impl Observation {
     /// Read the mesh. `features` is the stimulus used to compute live activation.
     pub fn capture(mesh: &NeuralMesh, features: &[f64], active: bool, last_trace: Option<PipelineTrace>) -> Self {
+        Self::capture_with(mesh, features, active, last_trace, RuntimeCalibration::default())
+    }
+
+    /// Read the mesh against an explicit calibration.
+    ///
+    /// The calibration decides what a reported millisecond is worth on the `[0, 1]`
+    /// scale the equations use, so the observatory has to be told the same one the
+    /// adapter is using or the economics panel quotes numbers nothing else agrees with.
+    pub fn capture_with(
+        mesh: &NeuralMesh,
+        features: &[f64],
+        active: bool,
+        last_trace: Option<PipelineTrace>,
+        calibration: RuntimeCalibration,
+    ) -> Self {
         let capabilities = mesh.capabilities();
         let capability_norm = normalize(&capabilities);
 
@@ -86,19 +135,26 @@ impl Observation {
             .nodes
             .iter()
             .enumerate()
-            .map(|(index, node)| AgentView {
-                id: node.id.clone(),
-                label: node.label.clone(),
-                role: node.role.as_str().to_string(),
-                capability: capabilities.get(index).copied().unwrap_or(0.0),
-                capability_norm: capability_norm.get(index).copied().unwrap_or(0.0),
-                confidence: node.confidence.clamp(0.0, 1.0),
-                trust: mesh.trust.inbound_trust(&node.id).clamp(0.0, 1.0),
-                activation: activation_norm.get(index).copied().unwrap_or(0.0),
-                attempts: node.telemetry.attempts,
-                successes: node.telemetry.successes,
-                failures: node.telemetry.failures,
-                last_action: node.telemetry.last_action.clone(),
+            .map(|(index, node)| {
+                let (expected_latency_ms, expected_cost) = router::expected_profile(node, &calibration);
+                AgentView {
+                    id: node.id.clone(),
+                    label: node.label.clone(),
+                    role: node.role.as_str().to_string(),
+                    capability: capabilities.get(index).copied().unwrap_or(0.0),
+                    capability_norm: capability_norm.get(index).copied().unwrap_or(0.0),
+                    confidence: node.confidence.clamp(0.0, 1.0),
+                    trust: mesh.trust.inbound_trust(&node.id).clamp(0.0, 1.0),
+                    activation: activation_norm.get(index).copied().unwrap_or(0.0),
+                    attempts: node.telemetry.attempts,
+                    successes: node.telemetry.successes,
+                    failures: node.telemetry.failures,
+                    last_action: node.telemetry.last_action.clone(),
+                    efficiency: node.resource_efficiency(),
+                    expected_latency_ms,
+                    expected_cost,
+                    observations: node.resources.observations,
+                }
             })
             .collect();
 
@@ -117,7 +173,57 @@ impl Observation {
             isolated: mesh.trust.isolated(),
             last_trace,
             active,
+            contract_version: CONTRACT_VERSION,
+            mesh_digest: mesh.digest(),
+            calibration,
+            head: mesh.head(),
+            open_runs: 0,
+            benchmark: None,
         }
+    }
+
+    /// Attach a benchmark report for the benchmark tab.
+    pub fn with_benchmark(mut self, benchmark: Option<BenchmarkReport>) -> Self {
+        self.benchmark = benchmark;
+        self
+    }
+
+    /// Record how many runs are planned but not yet finalized.
+    pub fn with_open_runs(mut self, open_runs: usize) -> Self {
+        self.open_runs = open_runs;
+        self
+    }
+
+    /// Where the last run's outcomes came from, if there was one.
+    pub fn provenance(&self) -> Option<OutcomeProvenance> {
+        self.last_trace.as_ref().map(|trace| trace.provenance)
+    }
+
+    /// Mean expected cost per stage across the cohort.
+    pub fn mean_expected_cost(&self) -> f64 {
+        if self.agents.is_empty() {
+            return 0.0;
+        }
+        self.agents.iter().map(|agent| agent.expected_cost).sum::<f64>() / self.agents.len() as f64
+    }
+
+    /// Mean expected latency per stage across the cohort, in milliseconds.
+    pub fn mean_expected_latency_ms(&self) -> f64 {
+        if self.agents.is_empty() {
+            return 0.0;
+        }
+        self.agents.iter().map(|agent| agent.expected_latency_ms).sum::<f64>() / self.agents.len() as f64
+    }
+
+    /// How much of the cohort has been measured rather than merely declared.
+    ///
+    /// This is the honest headline for an integration: a mesh where nothing has been
+    /// reported is running entirely on the numbers someone typed in at registration.
+    pub fn measured_share(&self) -> f64 {
+        if self.agents.is_empty() {
+            return 0.0;
+        }
+        self.agents.iter().filter(|agent| agent.is_measured()).count() as f64 / self.agents.len() as f64
     }
 
     /// Mean activation across the cohort — the mesh's live intensity.

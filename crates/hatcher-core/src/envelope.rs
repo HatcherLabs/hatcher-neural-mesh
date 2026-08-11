@@ -13,7 +13,11 @@ use sha2::{Digest, Sha256};
 pub const CANONICAL_CODEC: &str = "zk-canonical-v1";
 
 /// Schema version for the HAMNS contract layer.
-pub const SCHEMA_VERSION: u32 = 2;
+///
+/// Bumped to `3` in 1.0.0, when stage records gained quality, latency, error class, and
+/// provenance. A digest taken under schema 2 does not compare to one taken under 3, and
+/// that is the point of the field.
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// A digest-backed wrapper around any serializable payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

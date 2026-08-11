@@ -142,22 +142,103 @@ impl Default for CapabilityVector {
 /// What it costs to run an agent.
 ///
 /// Feeds the resource ratio `R_i = P_i / (Energy_i + Latency_i)`.
+///
+/// The first two fields are normalized into `[0, 1]` because that is the scale the
+/// equations work on. The last two are the absolutes a real runtime actually reports —
+/// milliseconds and cost units — kept alongside so the mesh can answer "how long will
+/// this take" in units a caller recognizes, and so a declared prior can be told apart
+/// from a measured fact. Both are `0.0` until something is observed.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct ResourceProfile {
     /// Normalized compute/token cost per task.
     pub energy: f64,
     /// Normalized round-trip latency per task (`1.0` == the slowest tolerated agent).
     pub latency: f64,
+    /// Exponentially-weighted mean of reported stage latency, in milliseconds.
+    /// `0.0` means nothing has been observed yet.
+    #[serde(default)]
+    pub observed_latency_ms: f64,
+    /// Exponentially-weighted mean of reported stage cost, in the caller's cost units.
+    /// `0.0` means nothing has been observed yet.
+    #[serde(default)]
+    pub observed_cost: f64,
+    /// How many reports have folded into the observed means.
+    #[serde(default)]
+    pub observations: u64,
 }
 
 impl ResourceProfile {
     pub fn new(energy: f64, latency: f64) -> Self {
-        Self { energy, latency }
+        Self {
+            energy,
+            latency,
+            observed_latency_ms: 0.0,
+            observed_cost: 0.0,
+            observations: 0,
+        }
     }
 
     /// Total cost denominator, floored so the ratio never divides by zero.
     pub fn cost(&self) -> f64 {
         (self.energy.max(0.0) + self.latency.max(0.0)).max(1e-6)
+    }
+
+    /// Whether any real report has landed on this profile.
+    pub fn is_observed(&self) -> bool {
+        self.observations > 0
+    }
+
+    /// Expected stage latency in milliseconds.
+    ///
+    /// Measured history when there is any, otherwise the declared prior projected onto
+    /// the given ceiling. A caller asking "will this agent fit in my 5-second budget"
+    /// deserves an answer either way; it just gets a better one once reports arrive.
+    pub fn expected_latency_ms(&self, latency_ceiling_ms: f64) -> f64 {
+        if self.is_observed() {
+            self.observed_latency_ms
+        } else {
+            self.latency.clamp(0.0, 1.0) * latency_ceiling_ms
+        }
+    }
+
+    /// Expected stage cost in the caller's cost units.
+    pub fn expected_cost(&self, cost_ceiling: f64) -> f64 {
+        if self.is_observed() {
+            self.observed_cost
+        } else {
+            self.energy.clamp(0.0, 1.0) * cost_ceiling
+        }
+    }
+
+    /// Fold one real observation into the profile.
+    ///
+    /// The normalized factors move with the absolutes, because they are two views of
+    /// the same fact: an agent that is measurably slower must become measurably worse on
+    /// `R_i`, or reporting latency would be decorative. `rate` is the EWMA weight given
+    /// to the new observation.
+    pub fn observe(&mut self, latency_ms: f64, cost: f64, latency_ceiling_ms: f64, cost_ceiling: f64, rate: f64) {
+        let rate = rate.clamp(0.0, 1.0);
+        let latency_ms = latency_ms.max(0.0);
+        let cost = cost.max(0.0);
+
+        // The first observation replaces the prior outright rather than averaging with
+        // it: a declared profile is a guess, and one real measurement is strictly better
+        // evidence than a guess it was never checked against.
+        if self.observations == 0 {
+            self.observed_latency_ms = latency_ms;
+            self.observed_cost = cost;
+        } else {
+            self.observed_latency_ms = self.observed_latency_ms * (1.0 - rate) + latency_ms * rate;
+            self.observed_cost = self.observed_cost * (1.0 - rate) + cost * rate;
+        }
+        self.observations += 1;
+
+        if latency_ceiling_ms > 0.0 {
+            self.latency = (self.observed_latency_ms / latency_ceiling_ms).clamp(0.0, 1.0);
+        }
+        if cost_ceiling > 0.0 {
+            self.energy = (self.observed_cost / cost_ceiling).clamp(0.0, 1.0);
+        }
     }
 }
 
@@ -318,6 +399,52 @@ mod tests {
         telemetry.attempts = 1;
         telemetry.failures = 1;
         assert!(telemetry.observed_performance(0.6) > 0.0, "one failure must not zero the agent");
+    }
+
+    #[test]
+    fn an_unobserved_profile_still_answers_the_latency_question() {
+        let profile = ResourceProfile::new(0.5, 0.25);
+        assert!(!profile.is_observed());
+        assert_eq!(profile.expected_latency_ms(60_000.0), 15_000.0, "projected from the prior");
+        assert_eq!(profile.expected_cost(2.0), 1.0);
+    }
+
+    #[test]
+    fn the_first_real_measurement_replaces_the_guess() {
+        let mut profile = ResourceProfile::new(0.9, 0.9);
+        profile.observe(1_000.0, 0.10, 60_000.0, 1.0, 0.25);
+
+        assert_eq!(profile.observations, 1);
+        assert_eq!(profile.observed_latency_ms, 1_000.0, "one measurement beats an unchecked prior");
+        assert!(profile.latency < 0.9, "and it must move the normalized factor too");
+        assert!((profile.energy - 0.10).abs() < 1e-9);
+    }
+
+    #[test]
+    fn later_measurements_are_smoothed_rather_than_chased() {
+        let mut profile = ResourceProfile::new(0.5, 0.5);
+        profile.observe(1_000.0, 0.1, 60_000.0, 1.0, 0.25);
+        profile.observe(5_000.0, 0.1, 60_000.0, 1.0, 0.25);
+
+        assert_eq!(profile.observations, 2);
+        assert!(
+            profile.observed_latency_ms > 1_000.0 && profile.observed_latency_ms < 5_000.0,
+            "an outlier moves the mean without becoming it, got {}",
+            profile.observed_latency_ms
+        );
+    }
+
+    #[test]
+    fn a_measurably_slower_agent_becomes_measurably_less_efficient() {
+        let mut quick = AgentNode::new("quick", "quick", AgentRole::Coder);
+        let mut slow = AgentNode::new("slow", "slow", AgentRole::Coder);
+        quick.resources.observe(500.0, 0.05, 60_000.0, 1.0, 0.5);
+        slow.resources.observe(45_000.0, 0.05, 60_000.0, 1.0, 0.5);
+
+        assert!(
+            quick.resource_efficiency() > slow.resource_efficiency(),
+            "reported latency has to reach R_i or reporting it is decorative"
+        );
     }
 
     #[test]

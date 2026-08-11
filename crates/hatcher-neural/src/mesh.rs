@@ -23,10 +23,10 @@
 //! residual, so an isolated node keeps its own signal instead of decaying to zero.
 
 use hatcher_core::{
-    canonical_digest, fold_digests, AgentNode, AgentRole, AgentSummary, CapabilityVector, ExecutionMode,
-    GlobalState, MemoryGraph, MeshAnalytics, MeshCoefficients, MeshConfigView, MeshEdge, MeshGraphView,
-    MeshIntelligence, MeshOverview, MeshSimulation, MeshState, MeshStepResult, ModelSpec, OmegaDelta,
-    OmegaLedger, OmegaSample, PriorityScore, ResourceProfile, TaskSpec, TrustMatrixView,
+    canonical_digest, fold_digests, AgentNode, AgentRole, AgentSummary, CapabilityVector, DecisionHead,
+    ExecutionMode, GlobalState, MemoryGraph, MeshAnalytics, MeshCoefficients, MeshConfigView, MeshEdge,
+    MeshGraphView, MeshIntelligence, MeshOverview, MeshSimulation, MeshState, MeshStepResult, ModelSpec,
+    OmegaDelta, OmegaLedger, OmegaSample, PriorityScore, ResourceProfile, TaskSpec, TrustMatrixView,
 };
 
 use crate::equations::{
@@ -143,6 +143,19 @@ impl NeuralMesh {
     /// A message explaining why the mesh is not running its requested backend, if so.
     pub fn degraded(&self) -> Option<&str> {
         self.degraded.as_deref()
+    }
+
+    /// The decision head, as the integration contract describes it.
+    pub fn head(&self) -> DecisionHead {
+        let spec = self.backend.spec();
+        DecisionHead::new(
+            self.backend.name(),
+            &spec.name,
+            &spec.version,
+            spec.input_dim,
+            spec.output_dim,
+        )
+        .with_degraded(self.degraded.clone())
     }
 
     // -----------------------------------------------------------------------
@@ -482,7 +495,13 @@ impl NeuralMesh {
         }
     }
 
-    /// A single commitment over the whole mesh: every node digest, then the edges.
+    /// A single commitment over the whole mesh: every node, the edges, `Ω`, and the head.
+    ///
+    /// The decision head is in here because it is not decoration — it is the thing that
+    /// turns mesh state into the control action a caller acts on. Two meshes with
+    /// identical nodes and identical trust but different policies return different
+    /// answers, so a commitment that ignored the head would attest to state while saying
+    /// nothing about what that state was used to decide.
     pub fn digest(&self) -> String {
         let mut digests: Vec<String> = self
             .nodes
@@ -491,6 +510,7 @@ impl NeuralMesh {
             .collect();
         digests.push(canonical_digest(&self.edges()).unwrap_or_default());
         digests.push(canonical_digest(&self.global).unwrap_or_default());
+        digests.push(canonical_digest(&self.head().commitment()).unwrap_or_default());
         fold_digests(digests)
     }
 

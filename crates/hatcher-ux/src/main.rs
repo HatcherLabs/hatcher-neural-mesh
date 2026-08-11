@@ -27,9 +27,12 @@ use std::thread;
 use std::time::Duration;
 
 use hatcher_core::{
-    ApiRequest, ApiResponse, ExecutionMode, MeshCoefficients, PipelineTrace, TaskSubmission,
+    AgentRegistration, AgentRole, ApiRequest, ApiResponse, ContractError, ExecutionMode, HatcherRequest,
+    MeshCoefficients, PipelineTrace, StageOutcomeReport, TaskEnvelope, TaskResult, TaskSubmission,
+    CONTRACT_VERSION,
 };
-use hatcher_playground::{AgentArena, AgentBattle, Scenario};
+use hatcher_neural::{pipeline, MeshAdapter};
+use hatcher_playground::{AgentArena, AgentBattle, Benchmark, Replay, Scenario};
 use serde::Serialize;
 use serde_json::json;
 use tokio::runtime::Runtime;
@@ -52,15 +55,19 @@ struct AppState {
 }
 
 struct MeshSession {
-    arena: AgentArena,
+    adapter: MeshAdapter,
     traces: Vec<PipelineTrace>,
     execution_mode: ExecutionMode,
 }
 
 impl MeshSession {
     fn new() -> Self {
+        // The arena is only used to resolve `HATCHER_MESH_MODEL` — it owns the ONNX
+        // fallback logic — and then hands its mesh to the adapter, which is what
+        // everything else in this process drives.
+        let arena = AgentArena::new().with_policy_from_env();
         Self {
-            arena: AgentArena::new().with_policy_from_env(),
+            adapter: MeshAdapter::with_mesh(arena.mesh),
             traces: Vec::new(),
             execution_mode: ExecutionMode::Controlled,
         }
@@ -71,6 +78,34 @@ impl MeshSession {
             self.traces.remove(0);
         }
         self.traces.push(trace);
+    }
+
+    /// Submit a task the way the frontend does: simulated outcomes, one call.
+    fn submit(&mut self, submission: &TaskSubmission) -> TaskResult {
+        let task = submission.to_task(self.adapter.mesh.sequence + 1);
+        let trace = pipeline::run(&mut self.adapter.mesh, &task);
+        TaskResult {
+            trace,
+            omega: self.adapter.mesh.global.omega,
+            regime: self.adapter.mesh.global.regime(),
+            intelligence: self.adapter.mesh.intelligence(),
+        }
+    }
+}
+
+/// Turn a contract error into the status the contract says it maps to.
+fn contract_reply(error: ContractError) -> Box<dyn warp::Reply> {
+    let status = StatusCode::from_u16(error.status()).unwrap_or(StatusCode::BAD_REQUEST);
+    Box::new(warp::reply::with_status(
+        warp::reply::json(&json!({ "error": error.to_string(), "detail": error })),
+        status,
+    ))
+}
+
+fn contract_result<T: Serialize>(result: Result<T, ContractError>) -> Box<dyn warp::Reply> {
+    match result {
+        Ok(value) => Box::new(warp::reply::json(&value)),
+        Err(error) => contract_reply(error),
     }
 }
 
@@ -141,9 +176,9 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .map(|state: AppState| {
             let (omega, agents, epoch) = state.with(|session| {
                 (
-                    session.arena.mesh.global.omega,
-                    session.arena.mesh.nodes.len(),
-                    session.arena.mesh.global.epoch,
+                    session.adapter.mesh.global.omega,
+                    session.adapter.mesh.nodes.len(),
+                    session.adapter.mesh.global.epoch,
                 )
             });
             warp::reply::json(&json!({
@@ -158,27 +193,27 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
     let overview = warp::path!("api" / "mesh" / "overview")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|s| s.arena.mesh.overview())));
+        .map(|state: AppState| warp::reply::json(&state.with(|s| s.adapter.mesh.overview())));
 
     let analytics = warp::path!("api" / "mesh" / "analytics")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|s| s.arena.mesh.analytics())));
+        .map(|state: AppState| warp::reply::json(&state.with(|s| s.adapter.mesh.analytics())));
 
     let graph = warp::path!("api" / "mesh" / "graph")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|s| s.arena.mesh.graph_view())));
+        .map(|state: AppState| warp::reply::json(&state.with(|s| s.adapter.mesh.graph_view())));
 
     let trust = warp::path!("api" / "mesh" / "trust")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|s| s.arena.mesh.trust_view())));
+        .map(|state: AppState| warp::reply::json(&state.with(|s| s.adapter.mesh.trust_view())));
 
     let agents = warp::path!("api" / "mesh" / "agents")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|s| s.arena.mesh.agent_summaries())));
+        .map(|state: AppState| warp::reply::json(&state.with(|s| s.adapter.mesh.agent_summaries())));
 
     let get_config = warp::path!("api" / "mesh" / "config")
         .and(warp::get())
@@ -186,7 +221,7 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .map(|state: AppState| {
             warp::reply::json(&state.with(|s| {
                 let mode = s.execution_mode;
-                s.arena.mesh.config_view(mode)
+                s.adapter.mesh.config_view(mode)
             }))
         });
 
@@ -201,9 +236,9 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
             match coefficients.validate() {
                 Ok(()) => {
                     let view = state.with(|session| {
-                        session.arena.mesh.coefficients = coefficients;
+                        session.adapter.mesh.coefficients = coefficients;
                         let mode = session.execution_mode;
-                        session.arena.mesh.config_view(mode)
+                        session.adapter.mesh.config_view(mode)
                     });
                     Box::new(warp::reply::json(&view))
                 }
@@ -232,7 +267,7 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
     let memory = warp::path!("api" / "mesh" / "memory")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|s| s.arena.mesh.memory.clone())));
+        .map(|state: AppState| warp::reply::json(&state.with(|s| s.adapter.mesh.memory.clone())));
 
     let submit_task = warp::path!("api" / "tasks")
         .and(warp::post())
@@ -240,7 +275,7 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(with_state(state.clone()))
         .map(|submission: TaskSubmission, state: AppState| {
             let result = state.with(|session| {
-                let result = session.arena.submit(&submission);
+                let result = session.submit(&submission);
                 session.log(result.trace.clone());
                 result
             });
@@ -290,7 +325,10 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(with_state(state.clone()))
         .map(|request: ApiRequest, state: AppState| {
             let response = state.with(|session| {
-                let hatcher = session.arena.evaluate(&request.agent_id, &request.prompt, request.features.clone());
+                let bridge = HatcherRequest::new(&request.agent_id, AgentRole::Explorer, session.execution_mode)
+                    .with_prompt(&request.prompt)
+                    .with_features(request.features.clone());
+                let hatcher = session.adapter.mesh.evaluate(&bridge);
                 ApiResponse {
                     accepted: hatcher.accepted,
                     action: hatcher.decision.action.clone(),
@@ -308,9 +346,10 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(with_state(state.clone()))
         .map(|request: ApiRequest, state: AppState| {
             let value = state.with(|session| {
-                session
-                    .arena
-                    .run_simulation(&request.agent_id, &request.prompt, request.features.clone(), 5)
+                let bridge = HatcherRequest::new(&request.agent_id, AgentRole::Explorer, session.execution_mode)
+                    .with_prompt(&request.prompt)
+                    .with_features(request.features.clone());
+                serde_json::to_value(session.adapter.mesh.rehearse(&bridge, 5)).unwrap_or(serde_json::Value::Null)
             });
             warp::reply::json(&value)
         });
@@ -319,13 +358,123 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(warp::get())
         .map(|| warp::reply::json(&AgentBattle::new().run()));
 
+    // -----------------------------------------------------------------------
+    // The integration contract
+    // -----------------------------------------------------------------------
+
+    // What a client needs to bind: the version, the verbs, and the scale the mesh
+    // normalizes reported milliseconds and cost units against.
+    let contract = warp::path!("api" / "contract")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .map(|state: AppState| {
+            let (calibration, open, cohort, head) = state.with(|session| {
+                (
+                    session.adapter.calibration,
+                    session.adapter.open_runs().len(),
+                    session.adapter.mesh.nodes.len(),
+                    session.adapter.head(),
+                )
+            });
+            warp::reply::json(&json!({
+                "contract_version": CONTRACT_VERSION,
+                "calibration": calibration,
+                "open_runs": open,
+                "cohort_size": cohort,
+                // A caller acting on `stabilize` is entitled to know which model proposed
+                // it, and whether the mesh is running the one it was asked to run.
+                "decision_head": head,
+                "verbs": {
+                    "register": "POST /api/mesh/agents",
+                    "plan":     "POST /api/runs",
+                    "report":   "POST /api/runs/{run_id}/outcomes",
+                    "finalize": "POST /api/runs/{run_id}/finalize",
+                },
+            }))
+        });
+
+    let register_agent = warp::path!("api" / "mesh" / "agents")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .map(|registration: AgentRegistration, state: AppState| {
+            contract_result(state.with(|session| session.adapter.register_agent(registration)))
+        });
+
+    let plan_run = warp::path!("api" / "runs")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .map(|envelope: TaskEnvelope, state: AppState| {
+            contract_result(state.with(|session| session.adapter.plan(&envelope)))
+        });
+
+    let list_runs = warp::path!("api" / "runs")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .map(|state: AppState| warp::reply::json(&state.with(|session| session.adapter.open_runs())));
+
+    let run_status = warp::path!("api" / "runs" / String)
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .map(|run_id: String, state: AppState| {
+            contract_result(state.with(|session| session.adapter.status(&run_id)))
+        });
+
+    let cancel_run = warp::path!("api" / "runs" / String)
+        .and(warp::delete())
+        .and(with_state(state.clone()))
+        .map(|run_id: String, state: AppState| {
+            contract_result(state.with(|session| session.adapter.cancel(&run_id).map(|()| json!({ "cancelled": run_id }))))
+        });
+
+    // A list rather than a single report, because a runtime that finishes a whole task
+    // before calling home should not have to make five round trips to say so.
+    let report_outcomes = warp::path!("api" / "runs" / String / "outcomes")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .map(|run_id: String, reports: Vec<StageOutcomeReport>, state: AppState| {
+            contract_result(state.with(|session| session.adapter.report_many(&run_id, reports)))
+        });
+
+    let finalize_run = warp::path!("api" / "runs" / String / "finalize")
+        .and(warp::post())
+        .and(with_state(state.clone()))
+        .map(|run_id: String, state: AppState| {
+            contract_result(state.with(|session| {
+                let receipt = session.adapter.finalize(&run_id)?;
+                if let Some(trace) = session.adapter.last_trace().cloned() {
+                    session.log(trace);
+                }
+                Ok(receipt)
+            }))
+        });
+
+    let benchmark = warp::path!("api" / "benchmark")
+        .and(warp::get())
+        .map(|| warp::reply::json(&Benchmark::new().run()));
+
+    let replay = warp::path!("api" / "replay")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .map(|replay: Replay, state: AppState| {
+            // Replayed against a copy of the cohort, never the live mesh: a replay is a
+            // measurement, and one that moved the mesh it was measuring would be worth
+            // nothing the second time it was run.
+            let (cohort, calibration) =
+                state.with(|session| (session.adapter.mesh.nodes.clone(), session.adapter.calibration));
+            warp::reply::json(&replay.evaluate(cohort, calibration))
+        });
+
     let reset = warp::path!("api" / "mesh" / "reset")
         .and(warp::post())
         .and(with_state(state.clone()))
         .map(|state: AppState| {
             let overview = state.with(|session| {
                 *session = MeshSession::new();
-                session.arena.mesh.overview()
+                session.adapter.mesh.overview()
             });
             warp::reply::json(&overview)
         });
@@ -341,7 +490,11 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         None => cors.allow_any_origin(),
     };
 
-    health
+    // Combined in three boxed groups rather than one long `.or()` chain. Each `.or()`
+    // nests the filter's type one level deeper, and a single chain this long makes rustc
+    // recurse far enough to blow its stack on Windows. `boxed()` erases the type at each
+    // group boundary and keeps the nesting shallow.
+    let read_models = health
         .or(overview)
         .or(analytics)
         .or(graph)
@@ -351,14 +504,32 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .or(put_config)
         .or(logs)
         .or(memory)
-        .or(submit_task)
+        .boxed();
+
+    let tasks = submit_task
         .or(list_tasks)
         .or(trace_by_id)
         .or(infer)
         .or(simulate)
         .or(battle)
+        .or(benchmark)
+        .or(replay)
         .or(reset)
-        .with(cors)
+        .boxed();
+
+    let contract_surface = contract
+        .or(register_agent)
+        // The two-segment run routes come before the one-segment ones: warp matches in
+        // order, and `/api/runs/{id}` would otherwise swallow `/api/runs/{id}/finalize`.
+        .or(report_outcomes)
+        .or(finalize_run)
+        .or(plan_run)
+        .or(list_runs)
+        .or(run_status)
+        .or(cancel_run)
+        .boxed();
+
+    read_models.or(tasks).or(contract_surface).with(cors)
 }
 
 fn mesh_port() -> u16 {
@@ -375,7 +546,14 @@ async fn serve_http(state: AppState, port: u16) {
     println!("  GET  /api/mesh/config     PUT /api/mesh/config");
     println!("  POST /api/tasks           GET /api/tasks   GET /api/tasks/{{id}}");
     println!("  POST /api/infer | /api/simulate | /api/mesh/reset");
-    println!("  GET  /api/battle");
+    println!("  GET  /api/battle | /api/benchmark    POST /api/replay");
+    println!("  -- integration contract v{CONTRACT_VERSION} --");
+    println!("  GET  /api/contract");
+    println!("  POST /api/mesh/agents                          register an agent");
+    println!("  POST /api/runs                                 plan a run");
+    println!("  POST /api/runs/{{id}}/outcomes                   report what happened");
+    println!("  POST /api/runs/{{id}}/finalize                   receive the decision");
+    println!("  GET  /api/runs | /api/runs/{{id}}   DELETE /api/runs/{{id}}");
     warp::serve(routes(state)).run(([127, 0, 0, 1], port)).await;
 }
 
@@ -438,10 +616,10 @@ fn build_telemetry_snapshot(state: &AppState, tick: usize) -> TelemetrySnapshot 
             urgency: Some(0.4),
             execution_mode: Some(ExecutionMode::Sandbox),
         };
-        let result = session.arena.submit(&submission);
+        let result = session.submit(&submission);
         session.log(result.trace.clone());
 
-        let overview = session.arena.mesh.overview();
+        let overview = session.adapter.mesh.overview();
         TelemetrySnapshot {
             tick,
             omega: overview.omega,
@@ -449,7 +627,7 @@ fn build_telemetry_snapshot(state: &AppState, tick: usize) -> TelemetrySnapshot 
             agents: overview.agent_count,
             intelligence: overview.intelligence.total,
             emergence: overview.emergence_ratio,
-            mean_trust: session.arena.mesh.trust.mean_trust(),
+            mean_trust: session.adapter.mesh.trust.mean_trust(),
             hubs: overview.hubs.len(),
             isolated: overview.isolated.len(),
             action: result.trace.decision.action.clone(),
@@ -477,6 +655,9 @@ fn print_menu() {
     println!("  run / r        - submit one task through the full pipeline");
     println!("  scenario / s   - run a 24-task scenario (rehearsal | stress | frontier)");
     println!("  battle / b     - compare coefficient tunings over identical work");
+    println!("  contract / c   - drive one task through the integration contract");
+    println!("  bench          - mesh routing vs the baselines (rehearsal | stress | frontier)");
+    println!("  replay         - replay a recording and score routing against it");
     println!("  overview / o   - agent roster, hubs, isolated agents");
     println!("  trust / t      - trust matrix and strongest collaborations");
     println!("  omega / w      - omega ledger and its terms");
@@ -498,7 +679,7 @@ fn command_run(state: &AppState) {
             urgency: Some(0.6),
             execution_mode: Some(session.execution_mode),
         };
-        let result = session.arena.submit(&submission);
+        let result = session.submit(&submission);
         session.log(result.trace.clone());
         result.trace
     });
@@ -529,7 +710,7 @@ fn command_scenario(state: &AppState, name: &str) {
     };
 
     let report = state.with(|session| {
-        let (report, traces) = hatcher_playground::run_scenario(&mut session.arena.mesh, &scenario);
+        let (report, traces) = hatcher_playground::run_scenario(&mut session.adapter.mesh, &scenario);
         for trace in traces {
             session.log(trace);
         }
@@ -542,7 +723,7 @@ fn command_scenario(state: &AppState, name: &str) {
 }
 
 fn command_overview(state: &AppState) {
-    let overview = state.with(|session| session.arena.mesh.overview());
+    let overview = state.with(|session| session.adapter.mesh.overview());
     println!(
         "omega {:.4} ({}) | epoch {} | A={:.4} (emergent {:.1}%) | {} agents, {} live edges",
         overview.omega,
@@ -577,7 +758,7 @@ fn command_overview(state: &AppState) {
 
 fn command_trust(state: &AppState) {
     let (view, collaborations) = state.with(|session| {
-        (session.arena.mesh.trust_view(), session.arena.mesh.top_collaborations(5))
+        (session.adapter.mesh.trust_view(), session.adapter.mesh.top_collaborations(5))
     });
 
     print!("{:<14}", "T_ij");
@@ -600,7 +781,7 @@ fn command_trust(state: &AppState) {
 }
 
 fn command_omega(state: &AppState) {
-    let analytics = state.with(|session| session.arena.mesh.analytics());
+    let analytics = state.with(|session| session.adapter.mesh.analytics());
     println!(
         "omega {:.4} | slope {:+.5}/epoch | A={:.4} | mean trust {:.3} | mean conf {:.3} | tasks {} ({:.0}% ok)",
         analytics.omega,
@@ -651,7 +832,7 @@ fn command_logs(state: &AppState) {
 }
 
 fn command_memory(state: &AppState) {
-    let memory = state.with(|session| session.arena.mesh.memory.clone());
+    let memory = state.with(|session| session.adapter.mesh.memory.clone());
     println!("nodes  : {}", memory.nodes.len());
     println!("edges  : {}", memory.edges.len());
     println!("records: {}", memory.records.len());
@@ -662,6 +843,139 @@ fn command_memory(state: &AppState) {
 
 fn short(id: &str) -> String {
     id.chars().take(9).collect()
+}
+
+/// Drive one task through the full integration contract, printing each verb.
+///
+/// The console command exists so the contract can be *seen* working before anyone wires
+/// a real runtime to it — plan, report, finalize, with the receipt at the end.
+fn command_contract(state: &AppState) {
+    let envelope = TaskEnvelope::new("harden the trust settlement path")
+        .with_domain("rust")
+        .with_features(vec![0.35, 0.72, 0.28, 0.64])
+        .with_urgency(0.6);
+
+    let plan = match state.with(|session| session.adapter.plan(&envelope)) {
+        Ok(plan) => plan,
+        Err(error) => return println!("plan rejected: {error}"),
+    };
+
+    let head = state.with(|session| session.adapter.head());
+    println!("contract v{}   run {}", plan.contract_version, plan.run_id);
+    println!(
+        "head     {} ({} v{}, {}→{}){}",
+        head.name,
+        head.model,
+        head.version,
+        head.input_dim,
+        head.output_dim,
+        match head.degraded.as_deref() {
+            Some(reason) => format!("  ⚠ degraded: {reason}"),
+            None => String::new(),
+        }
+    );
+    println!(
+        "plan     P={:.3} ({})  expects {:.0}ms / {:.3} cost",
+        plan.priority.value,
+        plan.band.as_str(),
+        plan.expected_latency_ms,
+        plan.expected_cost
+    );
+    for planned in &plan.stages {
+        println!(
+            "  {:<9} → {:<18} {}",
+            planned.stage.as_str(),
+            planned.agent_id,
+            planned.rationale
+        );
+    }
+    if !plan.constraint_violations.is_empty() {
+        println!("  ! could not satisfy constraints at: {}", plan.constraint_violations.join(", "));
+    }
+
+    // Stand in for a real runtime: report every stage as a solid success.
+    let reports: Vec<StageOutcomeReport> = plan
+        .stages
+        .iter()
+        .map(|planned| {
+            StageOutcomeReport::success(planned.stage, &planned.agent_id, 0.88)
+                .with_latency_ms(planned.expected_latency_ms)
+                .with_cost(planned.expected_cost)
+        })
+        .collect();
+
+    match state.with(|session| session.adapter.report_many(&plan.run_id, reports)) {
+        Ok(status) => println!("report   {} of 5 stages in, complete={}", status.reported.len(), status.complete),
+        Err(error) => return println!("report rejected: {error}"),
+    }
+
+    match state.with(|session| {
+        let receipt = session.adapter.finalize(&plan.run_id)?;
+        if let Some(trace) = session.adapter.last_trace().cloned() {
+            session.log(trace);
+        }
+        Ok::<_, ContractError>(receipt)
+    }) {
+        Ok(receipt) => {
+            println!(
+                "receipt  {} by {} (confidence {:.2}) | provenance {} | verified {}",
+                receipt.decision.action,
+                receipt.selected_agent.as_deref().unwrap_or("—"),
+                receipt.decision.confidence,
+                receipt.provenance.as_str(),
+                receipt.verified
+            );
+            println!("         {}", receipt.decision.rationale);
+            println!(
+                "         Ω {:.4} → {:.4} | {:.0}ms | {:.3} cost | quality {:.2}",
+                receipt.omega_before,
+                receipt.omega_after,
+                receipt.total_latency_ms,
+                receipt.total_cost,
+                receipt.mean_quality
+            );
+            println!("         trace {}", short_digest(&receipt.trace_digest));
+        }
+        Err(error) => println!("finalize rejected: {error}"),
+    }
+}
+
+fn short_digest(digest: &str) -> String {
+    digest.chars().take(16).collect()
+}
+
+/// Mesh routing against the baselines, over identical work.
+fn command_benchmark(state: &AppState, argument: &str) {
+    let scenario = match argument {
+        "stress" => Scenario::stress(),
+        "frontier" => Scenario::frontier(),
+        _ => Scenario::rehearsal(),
+    };
+    let _ = state;
+    println!("{}", Benchmark::new().with_scenario(scenario).run().table());
+}
+
+/// Replay a synthetic recording and score the mesh's routing against it.
+fn command_replay(state: &AppState) {
+    let replay = hatcher_playground::synthetic_recording(40, "expert");
+    let (cohort, calibration) =
+        state.with(|session| (session.adapter.mesh.nodes.clone(), session.adapter.calibration));
+    let report = replay.evaluate(cohort, calibration);
+
+    println!("{}", report.headline());
+    for (stage, agreement) in &report.per_stage_agreement {
+        println!(
+            "  {:<10} agreed {:>3}/{:<3} ({:.0}%)",
+            stage,
+            agreement.agreed,
+            agreement.compared,
+            agreement.rate() * 100.0
+        );
+    }
+    println!(
+        "  router added value: {}",
+        if report.router_added_value() { "yes" } else { "not demonstrated" }
+    );
 }
 
 fn interactive_cli(state: AppState) {
@@ -700,6 +1014,9 @@ fn interactive_cli(state: AppState) {
                     );
                 }
             }
+            "contract" | "c" => command_contract(&state),
+            "bench" => command_benchmark(&state, argument),
+            "replay" => command_replay(&state),
             "overview" | "o" => command_overview(&state),
             "trust" | "t" => command_trust(&state),
             "omega" | "w" => command_omega(&state),
@@ -789,7 +1106,7 @@ mod tests {
         let first = build_telemetry_snapshot(&state, 1);
         let second = build_telemetry_snapshot(&state, 2);
 
-        assert_eq!(state.with(|session| session.arena.mesh.global.epoch), 2);
+        assert_eq!(state.with(|session| session.adapter.mesh.global.epoch), 2);
         assert_eq!(state.with(|session| session.traces.len()), 2);
         assert_ne!(first.omega, second.omega, "telemetry must reflect real work");
     }
@@ -805,7 +1122,7 @@ mod tests {
             execution_mode: None,
         };
         for _ in 0..(TRACE_LOG_CAPACITY + 10) {
-            let result = session.arena.submit(&submission);
+            let result = session.submit(&submission);
             session.log(result.trace);
         }
         assert_eq!(session.traces.len(), TRACE_LOG_CAPACITY);
@@ -821,7 +1138,7 @@ mod tests {
             urgency: Some(0.5),
             execution_mode: Some(ExecutionMode::Controlled),
         };
-        let result = session.arena.submit(&submission);
+        let result = session.submit(&submission);
         let summary = TraceSummary::from(&result.trace);
 
         assert_eq!(summary.domain, "rust");
@@ -839,7 +1156,7 @@ mod tests {
         .join();
 
         // A panicked request must not brick the mesh for every later request.
-        assert_eq!(state.with(|session| session.arena.mesh.nodes.len()), 5);
+        assert_eq!(state.with(|session| session.adapter.mesh.nodes.len()), 5);
     }
 
     #[test]

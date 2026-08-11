@@ -21,9 +21,9 @@ onnx = ["hatcher-neural/onnx", "hatcher-playground/onnx"]
 # ANSI directly, so the observatory builds on the workspace MSRV and adds no
 # terminal backend to version-match against the host.
 [dependencies]
-hatcher-core = { path = "../hatcher-core", version = "0.23.0" }
-hatcher-neural = { path = "../hatcher-neural", version = "0.23.0" }
-hatcher-playground = { path = "../hatcher-playground", version = "0.23.0" }
+hatcher-core = { path = "../hatcher-core", version = "1.0.0" }
+hatcher-neural = { path = "../hatcher-neural", version = "1.0.0" }
+hatcher-playground = { path = "../hatcher-playground", version = "1.0.0" }
 
 [[bin]]
 name = "hatcher-terminal"

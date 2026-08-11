@@ -15,6 +15,15 @@
 //! | Trust matrix | Where is `T_ij` concentrating? |
 //! | Equations | What are all ten update rules doing right now? |
 //! | Pipeline | Where did the last task actually go, stage by stage? |
+//! | Contract | What is driving the mesh, and is any of it real? |
+//! | Benchmark | Does mesh routing beat a fixed assignment? |
+//! | Economics | What does this cohort cost, and how fast is it? |
+//!
+//! The last three exist because once something outside the mesh starts driving it,
+//! "the tornado is spinning" stops being the interesting question. A mesh running on
+//! declared numbers looks identical to one running on measured ones, so the contract
+//! tab says which it is and the economics tab marks every unmeasured figure as a
+//! declaration.
 //!
 //! The tornado is the headline. Radius is inverse capability, height is trust
 //! standing, angular speed is live activation, and the funnel's amplitude tracks
@@ -93,6 +102,6 @@ mod tests {
 
     #[test]
     fn version_is_the_release_under_test() {
-        assert_eq!(VERSION, "0.23.0");
+        assert_eq!(VERSION, "1.0.0");
     }
 }

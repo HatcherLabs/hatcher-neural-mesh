@@ -6,9 +6,35 @@ graph — a trained policy drops in without touching the equations, the routing,
 trust dynamics.
 
 ```bash
-cargo test -p hatcher-neural --features onnx
+cargo test -p hatcher-neural --features onnx           # 164 tests, 12 of them ONNX
 cargo run -p hatcher-ux --features onnx
+HATCHER_MESH_MODEL=models/policy.onnx cargo run -p hatcher-ux --features onnx
+cargo run -p hatcher-terminal --features onnx -- --model models/fixtures/hamns-policy-8x4.onnx
 ```
+
+## The head is part of the contract
+
+The equations govern the graph; the head governs which of four control actions goes back
+to Hatcher. Those are separate systems that can be swapped independently, so since `1.0.0`
+the head is **not** an implementation detail:
+
+* **Every `MeshReceipt` carries a `decision_head`** — name, model, version, dimensions, and
+  a `degraded` reason if the mesh is not running the head it was asked for. A caller acting
+  on `stabilize` is entitled to know which model proposed it.
+* **`GET /api/contract` reports it**, so a client can check before it starts sending work.
+* **The mesh digest commits to it.** Two meshes with identical nodes and identical trust but
+  different policies return different answers, so a commitment that ignored the head would
+  attest to state while saying nothing about what that state was used to decide. Pinned by
+  `swapping_the_decision_head_changes_the_mesh_commitment`.
+
+What the digest commits to is the head's *identity* — name, model, version, dimensions, and
+whether it is degraded — never the degradation *reason*. The reason contains a local
+filesystem path, and committing to it would make the same mesh running the same model hash
+differently on two machines.
+
+The guardrails still outrank the head. A policy is never allowed to claim `stabilize` on
+work that failed verification, and high-priority unverified work always escalates. A model
+cannot talk the mesh into accepting broken output.
 
 ## The contract
 
@@ -90,6 +116,47 @@ which is the worst possible moment to find out the policy was never viable.
 Errors are specific rather than a generic failure: `ModelNotFound` for a missing path,
 `InputShape` / `OutputShape` for a contract mismatch, `Runtime` for a graph tract cannot
 load or execute, and `BackendUnavailable` when the crate was built without the feature.
+
+### Degrade or fail? Both, deliberately
+
+| Entry point | On a bad model | Why |
+|---|---|---|
+| `NeuralMesh::try_with_onnx` | fails | the caller asked for *this* policy |
+| `MeshAdapter::try_with_policy` | fails | an adapter about to serve production traffic should not quietly answer from a different model |
+| `hatcher-terminal --model` | fails | an operator who named a policy opened the observatory to watch *that* policy |
+| `NeuralMesh::with_backend` | degrades, records the reason | a mistyped path should not take the mesh offline |
+| `HATCHER_MESH_MODEL` | degrades, prints a warning | ditto, and the sidecar has to boot |
+| `Benchmark::with_head` | degrades; `PolicyScorecard::head` records what ran | a benchmark that aborted would lose the other arms |
+
+Wherever it degrades, `mesh.degraded()` and `DecisionHead::degraded` carry the reason, the
+observatory's `contract` tab shows **DEGRADED** in red, and the receipt says so. Silent
+fallback is the one behaviour that is never on offer: it would mean an operator acting on
+decisions from a model they think they replaced.
+
+## Comparing heads
+
+A head does not change routing, outcomes, cost, or `Ω` — it only decides which control
+action comes back. What it moves is the escalation rate, which is the question worth asking
+of a trained policy: **does it hand less work to a human without handing over work it should
+have escalated?**
+
+```rust
+use hatcher_neural::BackendKind;
+use hatcher_playground::{Benchmark, Scenario};
+
+let native = Benchmark::new().with_scenario(Scenario::rehearsal()).run();
+let trained = Benchmark::new()
+    .with_scenario(Scenario::rehearsal())
+    .with_head(BackendKind::Onnx { model_path: "models/policy.onnx".into() })
+    .run();
+
+// Same routing, same outcomes — only `escalation_rate` should differ.
+```
+
+`head` is held constant *across* the arms of one benchmark on purpose: that benchmark varies
+routing, and an arm that also changed the head would not tell you which of the two moved the
+numbers. Every `PolicyScorecard` records the head that actually ran, so two reports are
+never compared blind.
 
 ## Runtime choice
 

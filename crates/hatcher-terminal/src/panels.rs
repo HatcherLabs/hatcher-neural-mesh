@@ -4,7 +4,7 @@
 //! They are deliberately independent: the dashboard is just a layout over these,
 //! and each can be exercised on its own in a test or a `--view` invocation.
 
-use hatcher_core::PipelineStage;
+use hatcher_core::{OutcomeProvenance, PipelineStage};
 
 use crate::canvas::Canvas;
 use crate::observe::{AgentView, Observation};
@@ -314,6 +314,344 @@ pub fn roster(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
         );
         let colour = theme::heat(agent.capability_norm);
         canvas.text_clipped(inner.x, y, &line, colour, inner.w);
+    }
+}
+
+/// The integration contract: what a caller binds to, and what it has told the mesh.
+///
+/// This panel exists because the interesting failure of an integration is silent. A mesh
+/// that has never received a real outcome report looks exactly like one that has —
+/// identical roster, identical trust graph, identical `Ω` — right up until someone acts
+/// on numbers that were only ever declarations. So provenance and measured share go
+/// first, above the verb map, and a rehearsing mesh is labelled as one.
+pub fn contract(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
+    canvas.frame(rect.x, rect.y, rect.w, rect.h, "INTEGRATION CONTRACT", theme::FRAME);
+    let inner = rect.inner();
+    if inner.w < 24 || inner.h < 3 {
+        return;
+    }
+
+    let (provenance, provenance_colour) = match observation.provenance() {
+        Some(OutcomeProvenance::Reported) => ("reported — real work", theme::GOOD),
+        Some(OutcomeProvenance::Mixed) => ("mixed — partly invented", theme::WARN),
+        Some(OutcomeProvenance::Simulated) => ("simulated — rehearsal", theme::WARN),
+        None => ("none — nothing has run", theme::LABEL),
+    };
+
+    let measured = observation.measured_share();
+    let digest: String = observation.mesh_digest.chars().take(16).collect();
+    let trace_digest = observation
+        .last_trace
+        .as_ref()
+        .map(|trace| trace.digest.chars().take(16).collect::<String>())
+        .unwrap_or_else(|| "—".into());
+
+    let mut row = 0i64;
+    let line = |canvas: &mut Canvas, row: &mut i64, text: String, colour: Rgb| {
+        if (*row as usize) < inner.h {
+            canvas.text_clipped(inner.x, inner.y + *row, &text, colour, inner.w);
+            *row += 1;
+        }
+    };
+
+    line(
+        canvas,
+        &mut row,
+        format!("contract v{}   open runs {}", observation.contract_version, observation.open_runs),
+        theme::TEXT,
+    );
+    line(canvas, &mut row, format!("outcomes  {provenance}"), provenance_colour);
+    line(
+        canvas,
+        &mut row,
+        format!(
+            "measured  {:.0}% of cohort ({}/{})",
+            measured * 100.0,
+            observation.agents.iter().filter(|a| a.is_measured()).count(),
+            observation.agents.len()
+        ),
+        if measured > 0.0 { theme::GOOD } else { theme::WARN },
+    );
+    // The head is above the digests because it is the one line here an operator can act
+    // on: a mesh silently running the built-in network after a failed policy load looks
+    // exactly like one running the policy, and the decisions differ.
+    let (head_text, head_colour) = match observation.head.degraded.as_deref() {
+        Some(_) => (
+            format!("{} (DEGRADED — not the requested head)", observation.head.name),
+            theme::BAD,
+        ),
+        None if observation.head.is_policy() => (format!("{} (policy)", observation.head.name), theme::GOOD),
+        None => (format!("{} (built-in)", observation.head.name), theme::TEXT),
+    };
+    line(canvas, &mut row, format!("head      {head_text}"), head_colour);
+    line(canvas, &mut row, format!("mesh      {digest}…"), theme::LABEL);
+    line(canvas, &mut row, format!("trace     {trace_digest}…"), theme::LABEL);
+    line(
+        canvas,
+        &mut row,
+        format!(
+            "scale     {:.0}s / {:.2} cost = 1.0",
+            observation.calibration.latency_ceiling_ms / 1000.0,
+            observation.calibration.cost_ceiling
+        ),
+        theme::LABEL,
+    );
+
+    if (row as usize) < inner.h {
+        row += 1;
+    }
+    line(canvas, &mut row, "THE FOUR VERBS".to_string(), theme::FRAME);
+    for (verb, detail) in [
+        ("register", "AgentRegistration  → RegistrationAck"),
+        ("plan", "TaskEnvelope       → RoutingPlan"),
+        ("report", "StageOutcomeReport → RunStatus"),
+        ("finalize", "run_id             → MeshReceipt"),
+    ] {
+        line(canvas, &mut row, format!("{verb:<9} {detail}"), theme::TEXT);
+    }
+}
+
+/// The last run's stage outcomes, on the four axes a caller actually reports.
+pub fn outcomes(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
+    canvas.frame(rect.x, rect.y, rect.w, rect.h, "STAGE OUTCOMES", theme::FRAME);
+    let inner = rect.inner();
+    if inner.w < 28 || inner.h < 2 {
+        return;
+    }
+
+    let Some(trace) = observation.last_trace.as_ref() else {
+        canvas.text_clipped(inner.x, inner.y, "idle — no outcomes yet", theme::LABEL, inner.w);
+        return;
+    };
+
+    canvas.text_clipped(
+        inner.x,
+        inner.y,
+        "STAGE      AGENT        QUAL   LAT      COST   WHY",
+        theme::FRAME,
+        inner.w,
+    );
+
+    let staffed = trace.stages.iter().filter(|record| record.stage.is_staffed());
+    for (index, record) in staffed.enumerate() {
+        let y = inner.y + 1 + index as i64;
+        if index + 1 >= inner.h {
+            break;
+        }
+
+        let colour = if record.success {
+            theme::heat(record.quality)
+        } else if record.error.is_trust_evidence() {
+            theme::BAD
+        } else {
+            // An outage is a failure the agent did not earn; colouring it like one the
+            // agent did earn is how an operator ends up blaming the wrong thing.
+            theme::WARN
+        };
+
+        let line = format!(
+            "{:<10} {:<12} {:.2}  {:>6.0}ms {:.3}  {}",
+            format!("{:?}", record.stage).to_lowercase(),
+            record
+                .agent
+                .as_deref()
+                .unwrap_or("—")
+                .chars()
+                .take(12)
+                .collect::<String>(),
+            record.quality,
+            record.latency_ms,
+            record.cost,
+            record.error.as_str()
+        );
+        canvas.text_clipped(inner.x, y, &line, colour, inner.w);
+    }
+
+    let summary_y = inner.y + inner.h as i64 - 1;
+    if summary_y > inner.y + 1 {
+        let summary = format!(
+            "total {:.0}ms  {:.3} cost  quality {:.2}  {}",
+            trace.total_latency_ms(),
+            trace.total_cost(),
+            trace.mean_quality(),
+            if trace.verified { "VERIFIED" } else { "UNVERIFIED" }
+        );
+        let colour = if trace.verified { theme::GOOD } else { theme::WARN };
+        canvas.text_clipped(inner.x, summary_y, &summary, colour, inner.w);
+    }
+}
+
+/// Mesh routing against the baselines, on quality, cost, latency, and reliability.
+pub fn benchmark(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
+    canvas.frame(rect.x, rect.y, rect.w, rect.h, "ROUTING BENCHMARK", theme::FRAME);
+    let inner = rect.inner();
+    if inner.w < 40 || inner.h < 3 {
+        return;
+    }
+
+    let Some(report) = observation.benchmark.as_ref() else {
+        canvas.text_clipped(
+            inner.x,
+            inner.y,
+            "no benchmark — run with --benchmark",
+            theme::LABEL,
+            inner.w,
+        );
+        return;
+    };
+
+    canvas.text_clipped(
+        inner.x,
+        inner.y,
+        &format!(
+            "scenario `{}` · {} tasks · baseline `{}`",
+            report.scenario,
+            report.tasks,
+            report.baseline.as_deref().unwrap_or("none")
+        ),
+        theme::LABEL,
+        inner.w,
+    );
+    canvas.text_clipped(
+        inner.x,
+        inner.y + 1,
+        "POLICY       QUAL  VERIF  STAGE  COST/OK  P50      Ω",
+        theme::FRAME,
+        inner.w,
+    );
+
+    for (index, scorecard) in report.scorecards.iter().enumerate() {
+        let y = inner.y + 2 + index as i64;
+        if index + 2 >= inner.h {
+            break;
+        }
+        let winner = scorecard.policy == report.winner;
+        let colour = if winner { theme::ACCENT } else { theme::heat(scorecard.mean_quality) };
+
+        let line = format!(
+            "{}{:<11} {:.2}  {:>4.0}%  {:>4.0}%  {:>7}  {:>6.0}ms {:.3}",
+            if winner { "▸" } else { " " },
+            scorecard.policy.chars().take(11).collect::<String>(),
+            scorecard.mean_quality,
+            scorecard.verified_rate * 100.0,
+            scorecard.stage_success_rate * 100.0,
+            scorecard
+                .cost_per_verified_task
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "n/a".into()),
+            scorecard.p50_latency_ms,
+            scorecard.omega_end
+        );
+        canvas.text_clipped(inner.x, y, &line, colour, inner.w);
+    }
+
+    // The deltas are the point of the panel. A reader who only looks at the absolute
+    // numbers cannot tell whether the router earned them or the cohort did.
+    let delta_y = inner.y + 3 + report.scorecards.len() as i64;
+    if (delta_y - inner.y) as usize + 1 < inner.h {
+        canvas.text_clipped(inner.x, delta_y, "VS BASELINE  QUALITY  RELIAB  COST  LATENCY", theme::FRAME, inner.w);
+        for (index, delta) in report.deltas.iter().enumerate() {
+            let y = delta_y + 1 + index as i64;
+            if (y - inner.y) as usize >= inner.h {
+                break;
+            }
+            let good = delta.cost_saving > 0.0 && delta.reliability_gain >= 0.0;
+            let line = format!(
+                "{:<12} {:+.3}   {:+.0}%   {:+.0}%  {:+.0}%{}",
+                delta.policy.chars().take(12).collect::<String>(),
+                delta.quality_gain,
+                delta.reliability_gain * 100.0,
+                delta.cost_saving * 100.0,
+                delta.latency_saving * 100.0,
+                if delta.dominates() { "  ✦ dominates" } else { "" }
+            );
+            canvas.text_clipped(inner.x, y, &line, if good { theme::GOOD } else { theme::LABEL }, inner.w);
+        }
+    }
+}
+
+/// What the cohort costs and how fast it is — declared versus measured.
+pub fn economics(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
+    canvas.frame(rect.x, rect.y, rect.w, rect.h, "COST & LATENCY", theme::FRAME);
+    let inner = rect.inner();
+    if inner.w < 34 || inner.h < 2 {
+        return;
+    }
+
+    canvas.text_clipped(
+        inner.x,
+        inner.y,
+        "AGENT        LATENCY    COST    R_i   SRC",
+        theme::FRAME,
+        inner.w,
+    );
+
+    // Slowest first: the panel exists to find the agent that is quietly costing the mesh
+    // its throughput, and sorting by capability would bury it.
+    let mut ranked: Vec<&AgentView> = observation.agents.iter().collect();
+    ranked.sort_by(|a, b| b.expected_latency_ms.total_cmp(&a.expected_latency_ms));
+
+    for (index, agent) in ranked.iter().enumerate() {
+        let y = inner.y + 1 + index as i64;
+        if index + 2 >= inner.h {
+            break;
+        }
+        let line = format!(
+            "{:<12} {:>7.0}ms {:>6.3}  {:>5.2}  {}",
+            agent.label.chars().take(12).collect::<String>(),
+            agent.expected_latency_ms,
+            agent.expected_cost,
+            agent.efficiency,
+            if agent.is_measured() {
+                format!("obs×{}", agent.observations)
+            } else {
+                "declared".to_string()
+            }
+        );
+        // A declared number is a guess someone typed in. Dimming it is the difference
+        // between reading this panel as evidence and reading it as a plan.
+        let colour = if agent.is_measured() { theme::TEXT } else { theme::LABEL };
+        canvas.text_clipped(inner.x, y, &line, colour, inner.w);
+    }
+
+    let summary_y = inner.y + inner.h as i64 - 1;
+    if summary_y > inner.y {
+        canvas.text_clipped(
+            inner.x,
+            summary_y,
+            &format!(
+                "mean {:.0}ms / {:.3} per stage · {:.0}% measured",
+                observation.mean_expected_latency_ms(),
+                observation.mean_expected_cost(),
+                observation.measured_share() * 100.0
+            ),
+            theme::ACCENT,
+            inner.w,
+        );
+    }
+}
+
+/// The tab strip: every view, with the active one lit.
+///
+/// Drawn as a row rather than folded into the header because the views are now the
+/// primary way around the observatory, and a list of names you can see is a better map
+/// than a `--view` flag you have to remember.
+pub fn tabs(canvas: &mut Canvas, width: usize, active: crate::dashboard::View, y: i64) {
+    let mut x = 1i64;
+    for view in crate::dashboard::View::ALL {
+        let selected = view == active;
+        let label = if selected {
+            format!("[{}]", view.as_str())
+        } else {
+            format!(" {} ", view.as_str())
+        };
+        let remaining = width.saturating_sub(x.max(0) as usize);
+        if remaining < label.chars().count() + 1 {
+            break;
+        }
+        let colour = if selected { theme::ACCENT } else { theme::LABEL };
+        canvas.text_clipped(x, y, &label, colour, remaining);
+        x += label.chars().count() as i64 + 1;
     }
 }
 

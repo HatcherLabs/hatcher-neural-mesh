@@ -33,10 +33,19 @@
 //! The equations themselves live in `hatcher-neural`; this crate defines the state
 //! they operate on, and seals that state into digest-backed [`envelope::Envelope`]s
 //! so any mesh observation can be attested to by the Hatcher control plane.
+//!
+//! ## Integrating a real runtime
+//!
+//! [`contract`] is the surface an external agent runtime binds to: register an agent,
+//! submit a task, receive a routing plan, report what actually happened, and get back a
+//! decision with a digest that pins it. It is the only module a client needs, and it is
+//! deliberately separate from the read models above — those describe the mesh to a
+//! dashboard, this one lets something drive it.
 
 pub mod agent;
 pub mod api;
 pub mod coefficients;
+pub mod contract;
 pub mod envelope;
 pub mod global;
 pub mod graph;
@@ -49,13 +58,18 @@ pub use api::{
     MeshConfigView, MeshGraphView, MeshOverview, NeuralSignal, TaskResult, TaskSubmission, TrustMatrixView,
 };
 pub use coefficients::{CoefficientError, MeshCoefficients};
+pub use contract::{
+    AgentRegistration, Attribution, ContractError, DecisionHead, ErrorClass, HeadCommitment, MeshReceipt,
+    OutcomeProvenance, PlannedStage, RegistrationAck, RoutingPlan, RuntimeCalibration, StageOutcomeReport,
+    StageReceipt, TaskEnvelope, CONTRACT_VERSION,
+};
 pub use envelope::{canonical_digest, fold_digests, Envelope, CANONICAL_CODEC, SCHEMA_VERSION};
 pub use global::{GlobalState, OmegaDelta, OmegaLedger, OmegaRegime, OmegaSample};
 pub use graph::{MeshEdge, MeshIntelligence, MeshSimulation, MeshState, MeshStepResult};
 pub use memory::{MemoryGraph, MemoryRecord};
 pub use task::{
-    Assignment, PipelineStage, PipelineTrace, PriorityBand, PriorityScore, StageRecord, TaskSpec,
-    DEFERRED_THRESHOLD, IMMEDIATE_THRESHOLD,
+    Assignment, PipelineStage, PipelineTrace, PriorityBand, PriorityScore, StageRecord, TaskConstraints,
+    TaskSpec, DEFERRED_THRESHOLD, IMMEDIATE_THRESHOLD,
 };
 
 /// Shape and identity of an inference model bound to the mesh.

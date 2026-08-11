@@ -18,17 +18,28 @@ control action; Hatcher acts. That boundary is what makes `ExecutionMode` meanin
 the mesh can rehearse in a sandbox at reduced plasticity without anything happening in
 the world.
 
+Since `1.0.0` that boundary is a typed contract rather than an assumption. The mesh plans;
+Hatcher executes; Hatcher reports what happened; the mesh learns from the report and never
+from its own expectations. See [`adapter.md`](./adapter.md) for the four verbs, and note the
+consequence for the trace digest: a run whose outcomes were simulated and a run whose
+outcomes were reported hash differently, so the two planes cannot be conflated after the
+fact.
+
 ## Crate layout
 
 ```text
-hatcher-core        contracts, state, digests, read models   (no logic)
+hatcher-core        contracts, integration contract, state, digests, read models  (no logic)
        ▲
-hatcher-neural      equations, trust, routing, pipeline, inference
+hatcher-neural      equations, trust, routing, pipeline, inference, outcome sources, adapter
        ▲
-hatcher-playground  scenarios, cohorts, coefficient battles
+hatcher-playground  scenarios, cohorts, coefficient battles, routing benchmark, replay
        ▲
 hatcher-ux          terminal console + HTTP API
+hatcher-terminal    the observatory (links core, neural, and playground directly)
 ```
+
+A client that only needs the wire types depends on `hatcher-core` alone — the integration
+contract lives there precisely so binding to it does not drag in the engine.
 
 Dependencies point one way. `hatcher-core` holds no dynamics at all: it defines the state
 the equations operate on and seals that state into digest-backed envelopes. Everything

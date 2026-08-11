@@ -12,7 +12,7 @@ resolver = "2"
 # lockstep — a HAMNS release is a release of the whole mesh, and a `hatcher-neural`
 # that does not match its `hatcher-core` is not a supported combination.
 [workspace.package]
-version = "0.23.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["HatcherLabs"]
 license = "MIT"

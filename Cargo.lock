@@ -476,7 +476,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hatcher-core"
-version = "0.23.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "hatcher-neural"
-version = "0.23.0"
+version = "1.0.0"
 dependencies = [
  "hatcher-core",
  "ndarray 0.16.1",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "hatcher-playground"
-version = "0.23.0"
+version = "1.0.0"
 dependencies = [
  "hatcher-core",
  "hatcher-neural",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "hatcher-terminal"
-version = "0.23.0"
+version = "1.0.0"
 dependencies = [
  "hatcher-core",
  "hatcher-neural",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "hatcher-ux"
-version = "0.23.0"
+version = "1.0.0"
 dependencies = [
  "hatcher-core",
  "hatcher-neural",

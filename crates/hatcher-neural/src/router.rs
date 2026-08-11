@@ -7,7 +7,7 @@
 //! equation is supposed to produce: urgent work goes to the strongest agent, deferred
 //! work goes to the cheapest one that can still do it.
 
-use hatcher_core::{AgentNode, Assignment, PipelineStage, PriorityBand, TaskSpec};
+use hatcher_core::{AgentNode, Assignment, PipelineStage, PriorityBand, RuntimeCalibration, TaskSpec};
 
 use crate::mesh::NeuralMesh;
 
@@ -53,17 +53,53 @@ pub fn score_candidate(mesh: &NeuralMesh, node: &AgentNode, task: &TaskSpec, ban
     capability * trust * mastery * cost_term
 }
 
+/// What the mesh expects a stage to take and cost if this agent runs it.
+///
+/// Measured history when the agent has any; otherwise its declared prior projected onto
+/// the calibration ceiling. The ceiling only matters for an unobserved agent — once real
+/// reports land, the absolutes are used directly and the projection stops mattering.
+pub fn expected_profile(node: &AgentNode, calibration: &RuntimeCalibration) -> (f64, f64) {
+    (
+        node.resources.expected_latency_ms(calibration.latency_ceiling_ms),
+        node.resources.expected_cost(calibration.cost_ceiling),
+    )
+}
+
+/// Whether an agent fits inside a task's declared limits.
+pub fn admits(node: &AgentNode, task: &TaskSpec, calibration: &RuntimeCalibration) -> bool {
+    if task.constraints.is_open() {
+        return true;
+    }
+    let (latency_ms, cost) = expected_profile(node, calibration);
+    task.constraints.admits(latency_ms, cost)
+}
+
 /// Rank every eligible candidate for a stage, best first.
 ///
 /// Eligibility prefers agents holding the stage's role. If none exist, the whole
 /// cohort is considered — a mesh missing a verifier should still verify, just worse.
-/// Isolated agents are excluded unless they are all that is left.
+/// Isolated agents are excluded unless they are all that is left, and the same applies
+/// to a caller's latency and cost limits: they narrow the pool, but they never empty it.
+/// Refusing to route is worse than routing over budget, and the caller is told which
+/// happened either way — see [`crate::adapter::MeshAdapter::plan`].
 pub fn rank(
     mesh: &NeuralMesh,
     stage: PipelineStage,
     task: &TaskSpec,
     band: PriorityBand,
     exclude: &[String],
+) -> Vec<Assignment> {
+    rank_with(mesh, stage, task, band, exclude, &RuntimeCalibration::default())
+}
+
+/// Rank candidates against an explicit calibration.
+pub fn rank_with(
+    mesh: &NeuralMesh,
+    stage: PipelineStage,
+    task: &TaskSpec,
+    band: PriorityBand,
+    exclude: &[String],
+    calibration: &RuntimeCalibration,
 ) -> Vec<Assignment> {
     let isolated = mesh.trust.isolated();
 
@@ -90,6 +126,13 @@ pub fn rank(
         .filter(|node| !isolated.contains(&node.id))
         .collect();
     let candidates = if healthy.is_empty() { available } else { healthy };
+
+    let affordable: Vec<&AgentNode> = candidates
+        .iter()
+        .copied()
+        .filter(|node| admits(node, task, calibration))
+        .collect();
+    let candidates = if affordable.is_empty() { candidates } else { affordable };
 
     let mut assignments: Vec<Assignment> = candidates
         .into_iter()
@@ -126,10 +169,24 @@ pub fn select(
     rank(mesh, stage, task, band, exclude).into_iter().next()
 }
 
+/// Pick the best agent for a stage against an explicit calibration.
+pub fn select_with(
+    mesh: &NeuralMesh,
+    stage: PipelineStage,
+    task: &TaskSpec,
+    band: PriorityBand,
+    exclude: &[String],
+    calibration: &RuntimeCalibration,
+) -> Option<Assignment> {
+    rank_with(mesh, stage, task, band, exclude, calibration)
+        .into_iter()
+        .next()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatcher_core::{AgentRole, CapabilityVector, ResourceProfile};
+    use hatcher_core::{AgentRole, CapabilityVector, ResourceProfile, TaskConstraints};
 
     fn task() -> TaskSpec {
         TaskSpec::new("task-1", "write the engine", "rust")
@@ -251,6 +308,67 @@ mod tests {
         let assignment =
             select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &["only".to_string()]).unwrap();
         assert_eq!(assignment.agent_id, "only", "a stage must be staffed even if it doubles up");
+    }
+
+    #[test]
+    fn a_latency_limit_narrows_the_pool() {
+        let mut fast = AgentNode::new("fast", "fast", AgentRole::Coder)
+            .with_capability(CapabilityVector::uniform(0.5))
+            .with_expertise("rust", 0.5);
+        let mut slow = AgentNode::new("slow", "slow", AgentRole::Coder)
+            .with_capability(CapabilityVector::uniform(0.95))
+            .with_expertise("rust", 0.95);
+        fast.resources.observe(2_000.0, 0.1, 60_000.0, 1.0, 1.0);
+        slow.resources.observe(40_000.0, 0.1, 60_000.0, 1.0, 1.0);
+
+        let mesh = NeuralMesh::with_cohort(vec![fast, slow]);
+
+        let unconstrained = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]).unwrap();
+        assert_eq!(unconstrained.agent_id, "slow", "left alone, the mesh takes the strong agent");
+
+        let urgent = task().with_constraints(TaskConstraints::latency(5_000.0));
+        let constrained = select(&mesh, PipelineStage::Code, &urgent, PriorityBand::Standard, &[]).unwrap();
+        assert_eq!(constrained.agent_id, "fast", "a deadline excludes the agent that cannot meet it");
+    }
+
+    #[test]
+    fn an_impossible_limit_still_routes_rather_than_stalling() {
+        let mesh = NeuralMesh::default();
+        let impossible = task().with_constraints(TaskConstraints::latency(1.0));
+        let assignment = select(&mesh, PipelineStage::Code, &impossible, PriorityBand::Standard, &[]);
+        assert!(
+            assignment.is_some(),
+            "refusing to route is worse than routing over budget; the plan reports the violation"
+        );
+    }
+
+    #[test]
+    fn a_cost_limit_prices_agents_on_what_they_were_measured_to_cost() {
+        let mut cheap = AgentNode::new("cheap", "cheap", AgentRole::Coder)
+            .with_capability(CapabilityVector::uniform(0.6))
+            .with_expertise("rust", 0.6);
+        let mut pricey = AgentNode::new("pricey", "pricey", AgentRole::Coder)
+            .with_capability(CapabilityVector::uniform(0.95))
+            .with_expertise("rust", 0.95);
+        cheap.resources.observe(1_000.0, 0.02, 60_000.0, 1.0, 1.0);
+        pricey.resources.observe(1_000.0, 0.80, 60_000.0, 1.0, 1.0);
+
+        let mesh = NeuralMesh::with_cohort(vec![cheap, pricey]);
+        let budgeted = task().with_constraints(TaskConstraints::cost(0.10));
+        let assignment = select(&mesh, PipelineStage::Code, &budgeted, PriorityBand::Standard, &[]).unwrap();
+        assert_eq!(assignment.agent_id, "cheap");
+    }
+
+    #[test]
+    fn an_unobserved_agent_is_judged_on_its_declared_prior() {
+        let node = AgentNode::new("declared", "declared", AgentRole::Coder)
+            .with_resources(ResourceProfile::new(0.5, 0.5));
+        let calibration = RuntimeCalibration::default();
+        let (latency_ms, cost) = expected_profile(&node, &calibration);
+
+        assert_eq!(latency_ms, 30_000.0, "half of a 60s ceiling");
+        assert_eq!(cost, 0.5);
+        assert!(!admits(&node, &task().with_constraints(TaskConstraints::latency(10_000.0)), &calibration));
     }
 
     #[test]
