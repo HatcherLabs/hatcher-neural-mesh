@@ -11,7 +11,7 @@ ONNX policy, and a four-verb integration contract for driving it from a real age
 **New in 1.0.0:** the mesh no longer has to invent its own outcomes. Register your agents,
 submit a task, receive a routing plan, run it for real, and report back what actually
 happened — success, verifier score, latency, cost, and a classified error. See
-[`docs/adapter.md`](docs/adapter.md).
+[`docs/adapter.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/adapter.md).
 
 ## The thesis
 
@@ -45,7 +45,7 @@ Most agent frameworks treat a fleet as a list. HAMNS treats it as a graph with d
 10. Resource ratio        R_i    = P_i / (Energy_i + Latency_i)
 ```
 
-[`docs/hamns.md`](docs/hamns.md) is the full specification: what every variable is
+[`docs/hamns.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/hamns.md) is the full specification: what every variable is
 measured from in software, where each equation lives in the code, and the two places
 this implementation deliberately refines the stated rules (and why).
 
@@ -126,7 +126,7 @@ Only reported outcomes teach the mesh what an agent costs. A simulated latency i
 from the agent's own profile, so folding it back would be a closed loop that drifts with
 every rehearsal and calls the drift evidence.
 
-[`docs/adapter.md`](docs/adapter.md) is the full contract, including the error-class table,
+[`docs/adapter.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/adapter.md) is the full contract, including the error-class table,
 the calibration model, and an explicit list of what it does *not* do.
 
 ## Does the routing pay for itself?
@@ -151,7 +151,7 @@ routing on price alone does not save money, it moves the bill.
 The harness also reports where the mesh **loses** — on `frontier`, a domain nobody has
 mastered, it under-provisions and verifies nothing while a fixed assignment manages 4%. That
 result is pinned by a test, so fixing the router forces the documentation to be updated
-rather than letting a stale claim survive. See [`docs/benchmark.md`](docs/benchmark.md).
+rather than letting a stale claim survive. See [`docs/benchmark.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/benchmark.md).
 
 Point the replay harness at real recorded runs and it scores the mesh's routing against the
 choices that were actually made, without ever seeing your prompts or outputs.
@@ -313,7 +313,7 @@ startup rather than on the first real request.
 
 The head proposes; the mesh disposes: a model is never allowed to claim `stabilize` on
 work that failed verification, and high-priority unverified work always escalates to a
-human. See [`docs/onnx.md`](docs/onnx.md) for the model contract.
+human. See [`docs/onnx.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/onnx.md) for the model contract.
 
 **The head is part of the contract, not an implementation detail.** Every `MeshReceipt`
 carries a `decision_head` — name, version, dimensions, and a reason if the mesh is not
@@ -343,15 +343,15 @@ A client that only needs the wire types can depend on `hatcher-core` alone.
 
 ## Docs
 
-* [`docs/adapter.md`](docs/adapter.md) — **the integration contract**: the four verbs, the
+* [`docs/adapter.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/adapter.md) — **the integration contract**: the four verbs, the
   error-class table, calibration, and what it deliberately does not do
-* [`docs/benchmark.md`](docs/benchmark.md) — mesh routing vs. the baselines, with results
+* [`docs/benchmark.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/benchmark.md) — mesh routing vs. the baselines, with results
   and the scenario where the mesh loses
-* [`docs/zk.md`](docs/zk.md) — the canonical digest as shipped, and a precise statement of
+* [`docs/zk.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/zk.md) — the canonical digest as shipped, and a precise statement of
   what a ZK proof would prove and when a signature would do instead
-* [`docs/hamns.md`](docs/hamns.md) — the full specification
-* [`docs/architecture.md`](docs/architecture.md) — how the layers fit together
-* [`docs/onnx.md`](docs/onnx.md) — decision-head model contract
+* [`docs/hamns.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/hamns.md) — the full specification
+* [`docs/architecture.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/architecture.md) — how the layers fit together
+* [`docs/onnx.md`](https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh/blob/main/docs/onnx.md) — decision-head model contract
 
 ## License
 
