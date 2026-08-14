@@ -113,13 +113,23 @@ impl MeshState {
     }
 
     pub fn edge(&self, from: &str, to: &str) -> Option<&MeshEdge> {
-        self.edges.iter().find(|edge| edge.from == from && edge.to == to)
+        self.edges
+            .iter()
+            .find(|edge| edge.from == from && edge.to == to)
     }
 
     /// Live edges, strongest connection first.
     pub fn active_edges(&self) -> Vec<&MeshEdge> {
-        let mut edges: Vec<&MeshEdge> = self.edges.iter().filter(|edge| !edge.is_dormant()).collect();
-        edges.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+        let mut edges: Vec<&MeshEdge> = self
+            .edges
+            .iter()
+            .filter(|edge| !edge.is_dormant())
+            .collect();
+        edges.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         edges
     }
 }
@@ -198,7 +208,11 @@ mod tests {
 
     #[test]
     fn state_lookups_resolve_by_id() {
-        let state = MeshState::new(vec![AgentNode::new("planner-1", "planner", AgentRole::Planner)]);
+        let state = MeshState::new(vec![AgentNode::new(
+            "planner-1",
+            "planner",
+            AgentRole::Planner,
+        )]);
         assert_eq!(state.index_of("planner-1"), Some(0));
         assert!(state.node("planner-1").is_some());
         assert!(state.node("missing").is_none());

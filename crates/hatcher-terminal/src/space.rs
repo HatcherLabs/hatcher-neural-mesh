@@ -144,7 +144,9 @@ mod tests {
             pitch: 0.0,
             ..Camera::default()
         };
-        let p = camera.project(Vec3::ZERO, 40.0, 12.0).expect("origin is visible");
+        let p = camera
+            .project(Vec3::ZERO, 40.0, 12.0)
+            .expect("origin is visible");
         assert_eq!((p.x, p.y), (40, 12));
         assert!((p.depth - camera.distance).abs() < 1e-9);
     }
@@ -156,8 +158,12 @@ mod tests {
             pitch: 0.0,
             ..Camera::default()
         };
-        let near = camera.project(Vec3::new(0.0, 0.0, -2.0), 40.0, 12.0).unwrap();
-        let far = camera.project(Vec3::new(0.0, 0.0, 2.0), 40.0, 12.0).unwrap();
+        let near = camera
+            .project(Vec3::new(0.0, 0.0, -2.0), 40.0, 12.0)
+            .unwrap();
+        let far = camera
+            .project(Vec3::new(0.0, 0.0, 2.0), 40.0, 12.0)
+            .unwrap();
         assert!(near.depth < far.depth);
         assert!(near.scale > far.scale);
     }
@@ -170,7 +176,9 @@ mod tests {
             distance: 1.0,
             focal: 14.0,
         };
-        assert!(camera.project(Vec3::new(0.0, 0.0, -5.0), 40.0, 12.0).is_none());
+        assert!(camera
+            .project(Vec3::new(0.0, 0.0, -5.0), 40.0, 12.0)
+            .is_none());
     }
 
     #[test]
@@ -180,7 +188,9 @@ mod tests {
             pitch: 0.0,
             ..Camera::default()
         };
-        let high = camera.project(Vec3::new(0.0, 1.0, 0.0), 40.0, 12.0).unwrap();
+        let high = camera
+            .project(Vec3::new(0.0, 1.0, 0.0), 40.0, 12.0)
+            .unwrap();
         assert!(high.y < 12, "positive world y must render above centre");
     }
 

@@ -88,7 +88,13 @@ pub struct CapabilityVector {
 }
 
 impl CapabilityVector {
-    pub fn new(intelligence: f64, specialization: f64, performance: f64, context: f64, memory: f64) -> Self {
+    pub fn new(
+        intelligence: f64,
+        specialization: f64,
+        performance: f64,
+        context: f64,
+        memory: f64,
+    ) -> Self {
         Self {
             intelligence,
             specialization,
@@ -105,7 +111,8 @@ impl CapabilityVector {
 
     /// `A_i` — the multiplicative capability scalar.
     pub fn capability(&self) -> f64 {
-        (self.intelligence * self.specialization * self.performance * self.context * self.memory).max(0.0)
+        (self.intelligence * self.specialization * self.performance * self.context * self.memory)
+            .max(0.0)
     }
 
     /// The weakest factor, i.e. the one that is actually capping this agent.
@@ -119,7 +126,13 @@ impl CapabilityVector {
         ];
         factors
             .into_iter()
-            .fold(("intelligence", f64::MAX), |acc, item| if item.1 < acc.1 { item } else { acc })
+            .fold(("intelligence", f64::MAX), |acc, item| {
+                if item.1 < acc.1 {
+                    item
+                } else {
+                    acc
+                }
+            })
     }
 
     /// Clamp every factor into `[0, 1]`.
@@ -216,7 +229,14 @@ impl ResourceProfile {
     /// the same fact: an agent that is measurably slower must become measurably worse on
     /// `R_i`, or reporting latency would be decorative. `rate` is the EWMA weight given
     /// to the new observation.
-    pub fn observe(&mut self, latency_ms: f64, cost: f64, latency_ceiling_ms: f64, cost_ceiling: f64, rate: f64) {
+    pub fn observe(
+        &mut self,
+        latency_ms: f64,
+        cost: f64,
+        latency_ceiling_ms: f64,
+        cost_ceiling: f64,
+        rate: f64,
+    ) {
         let rate = rate.clamp(0.0, 1.0);
         let latency_ms = latency_ms.max(0.0);
         let cost = cost.max(0.0);
@@ -330,7 +350,8 @@ impl AgentNode {
     }
 
     pub fn with_expertise(mut self, domain: impl Into<String>, mastery: f64) -> Self {
-        self.expertise.insert(domain.into(), mastery.clamp(0.0, 1.0));
+        self.expertise
+            .insert(domain.into(), mastery.clamp(0.0, 1.0));
         self
     }
 
@@ -395,17 +416,28 @@ mod tests {
     #[test]
     fn observed_performance_smooths_early_history() {
         let mut telemetry = NodeTelemetry::default();
-        assert_eq!(telemetry.observed_performance(0.6), 0.6, "unproven agents keep their prior");
+        assert_eq!(
+            telemetry.observed_performance(0.6),
+            0.6,
+            "unproven agents keep their prior"
+        );
         telemetry.attempts = 1;
         telemetry.failures = 1;
-        assert!(telemetry.observed_performance(0.6) > 0.0, "one failure must not zero the agent");
+        assert!(
+            telemetry.observed_performance(0.6) > 0.0,
+            "one failure must not zero the agent"
+        );
     }
 
     #[test]
     fn an_unobserved_profile_still_answers_the_latency_question() {
         let profile = ResourceProfile::new(0.5, 0.25);
         assert!(!profile.is_observed());
-        assert_eq!(profile.expected_latency_ms(60_000.0), 15_000.0, "projected from the prior");
+        assert_eq!(
+            profile.expected_latency_ms(60_000.0),
+            15_000.0,
+            "projected from the prior"
+        );
         assert_eq!(profile.expected_cost(2.0), 1.0);
     }
 
@@ -415,8 +447,14 @@ mod tests {
         profile.observe(1_000.0, 0.10, 60_000.0, 1.0, 0.25);
 
         assert_eq!(profile.observations, 1);
-        assert_eq!(profile.observed_latency_ms, 1_000.0, "one measurement beats an unchecked prior");
-        assert!(profile.latency < 0.9, "and it must move the normalized factor too");
+        assert_eq!(
+            profile.observed_latency_ms, 1_000.0,
+            "one measurement beats an unchecked prior"
+        );
+        assert!(
+            profile.latency < 0.9,
+            "and it must move the normalized factor too"
+        );
         assert!((profile.energy - 0.10).abs() < 1e-9);
     }
 

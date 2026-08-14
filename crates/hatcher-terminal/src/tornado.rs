@@ -82,16 +82,22 @@ impl Tornado {
     /// Speed falls off with height: the touchdown point whips around fastest,
     /// which is what sells the shape as a vortex under rotation.
     pub fn spin_at(&self, t: f64) -> f64 {
-        let base = if self.active { IDLE_SPIN + 2.4 * self.intensity.clamp(0.0, 1.0) } else { IDLE_SPIN };
+        let base = if self.active {
+            IDLE_SPIN + 2.4 * self.intensity.clamp(0.0, 1.0)
+        } else {
+            IDLE_SPIN
+        };
         base * (1.9 - 0.9 * t.clamp(0.0, 1.0))
     }
 
     /// World position of a node at time `time`.
     pub fn node_position(&self, node: &VortexNode, time: f64) -> Vec3 {
         // Strong agents sit near the axis; weak ones are thrown to the rim.
-        let t = (1.0 - node.capability.clamp(0.0, 1.0)) * 0.75 + (1.0 - node.trust.clamp(0.0, 1.0)) * 0.25;
+        let t = (1.0 - node.capability.clamp(0.0, 1.0)) * 0.75
+            + (1.0 - node.trust.clamp(0.0, 1.0)) * 0.25;
         let radius = self.radius_at(t);
-        let angle = node.phase + time * self.spin_at(t) * (0.6 + 0.8 * node.activation.clamp(0.0, 1.0));
+        let angle =
+            node.phase + time * self.spin_at(t) * (0.6 + 0.8 * node.activation.clamp(0.0, 1.0));
         let y = -self.height() * 0.5 + self.height() * t;
         Vec3::new(radius * angle.cos(), y, radius * angle.sin())
     }
@@ -155,7 +161,9 @@ impl Tornado {
 
             for slot in 0..per_ring {
                 let seed = (ring * per_ring + slot) as f64;
-                let angle = ring_offset + slot as f64 * std::f64::consts::TAU / per_ring as f64 + time * spin;
+                let angle = ring_offset
+                    + slot as f64 * std::f64::consts::TAU / per_ring as f64
+                    + time * spin;
                 // Break the ring into turbulence so the wall has thickness.
                 let jitter = 0.86 + 0.14 * ((seed * 0.754_877_666) % 1.0);
                 let radius = base_radius * jitter;
@@ -188,7 +196,15 @@ impl Tornado {
         let top = camera.project(Vec3::new(0.0, half, 0.0), cx, cy);
         let bottom = camera.project(Vec3::new(0.0, -half, 0.0), cx, cy);
         if let (Some(a), Some(b)) = (top, bottom) {
-            canvas.line(a.x, a.y, b.x, b.y, '│', theme::FRAME, (a.depth + b.depth) * 0.5);
+            canvas.line(
+                a.x,
+                a.y,
+                b.x,
+                b.y,
+                '│',
+                theme::FRAME,
+                (a.depth + b.depth) * 0.5,
+            );
         }
     }
 
@@ -197,7 +213,12 @@ impl Tornado {
         let mut projected: Vec<(Projected, &VortexNode)> = self
             .nodes
             .iter()
-            .filter_map(|node| Some((camera.project(self.node_position(node, time), cx, cy)?, node)))
+            .filter_map(|node| {
+                Some((
+                    camera.project(self.node_position(node, time), cx, cy)?,
+                    node,
+                ))
+            })
             .collect();
 
         for (p, node) in &projected {
@@ -274,7 +295,10 @@ mod tests {
         let active = tornado(true, 0.9);
         let idle = tornado(false, 0.0);
         assert!(active.spin_at(0.5) > idle.spin_at(0.5));
-        assert!(idle.spin_at(0.5) > 0.0, "an idle mesh drifts, it does not freeze");
+        assert!(
+            idle.spin_at(0.5) > 0.0,
+            "an idle mesh drifts, it does not freeze"
+        );
     }
 
     #[test]
@@ -290,7 +314,10 @@ mod tests {
         let weak = t.node_position(&t.nodes[1], 0.0);
         let radius = |v: Vec3| (v.x * v.x + v.z * v.z).sqrt();
         assert!(radius(strong) < radius(weak));
-        assert!(strong.y < weak.y, "a strong, trusted agent sits low in the funnel core");
+        assert!(
+            strong.y < weak.y,
+            "a strong, trusted agent sits low in the funnel core"
+        );
     }
 
     #[test]
@@ -347,7 +374,10 @@ mod tests {
         let camera = Camera::default();
         let small = t.fit_focal(&camera, 40, 12);
         let large = t.fit_focal(&camera, 120, 40);
-        assert!(large > small, "a bigger panel must earn a longer focal length");
+        assert!(
+            large > small,
+            "a bigger panel must earn a longer focal length"
+        );
     }
 
     #[test]
@@ -356,7 +386,10 @@ mod tests {
         let camera = Camera::default();
         tornado(true, 0.9).draw(&mut canvas, &camera, 30.0, 12.0, 1.0);
         let plain = canvas.render_plain();
-        assert!(plain.chars().any(|c| !c.is_whitespace()), "the vortex must render something");
+        assert!(
+            plain.chars().any(|c| !c.is_whitespace()),
+            "the vortex must render something"
+        );
         assert_eq!(plain.lines().count(), 24);
         assert!(plain.lines().all(|line| line.chars().count() == 60));
     }

@@ -173,16 +173,28 @@ impl std::fmt::Display for CoefficientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CoefficientError::NonNegativeRate { name, value } => {
-                write!(f, "coefficient `{name}` must be finite and non-negative, got {value}")
+                write!(
+                    f,
+                    "coefficient `{name}` must be finite and non-negative, got {value}"
+                )
             }
             CoefficientError::RateTooLarge { name, value } => {
-                write!(f, "coefficient `{name}` must be <= 1.0 to stay stable, got {value}")
+                write!(
+                    f,
+                    "coefficient `{name}` must be <= 1.0 to stay stable, got {value}"
+                )
             }
             CoefficientError::TauMustBePositive { value } => {
-                write!(f, "tau must be > 0 so the priority denominator never vanishes, got {value}")
+                write!(
+                    f,
+                    "tau must be > 0 so the priority denominator never vanishes, got {value}"
+                )
             }
             CoefficientError::EmergenceUnstable { gamma } => {
-                write!(f, "gamma > 0.5 lets the pairwise emergence term dominate, got {gamma}")
+                write!(
+                    f,
+                    "gamma > 0.5 lets the pairwise emergence term dominate, got {gamma}"
+                )
             }
         }
     }

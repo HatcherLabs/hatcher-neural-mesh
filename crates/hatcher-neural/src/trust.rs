@@ -197,7 +197,8 @@ impl TrustGraph {
                     // Weight this pair's contribution to C by how much the mesh
                     // trusts it: a success across a distrusted link says less about
                     // the mesh's collaboration quality than one across a trusted link.
-                    trusted_successes += self.pending_success[[i, j]] * (0.5 + 0.5 * self.trust[[i, j]]);
+                    trusted_successes +=
+                        self.pending_success[[i, j]] * (0.5 + 0.5 * self.trust[[i, j]]);
                     interactions += observed;
                 }
 
@@ -282,26 +283,40 @@ impl TrustGraph {
     }
 
     fn column_mean(&self, matrix: &Array2<f64>, id: &str) -> f64 {
-        let Some(j) = self.index_of(id) else { return 0.0 };
+        let Some(j) = self.index_of(id) else {
+            return 0.0;
+        };
         let n = self.ids.len();
         if n < 2 {
             return 0.0;
         }
-        (0..n).filter(|i| *i != j).map(|i| matrix[[i, j]]).sum::<f64>() / (n - 1) as f64
+        (0..n)
+            .filter(|i| *i != j)
+            .map(|i| matrix[[i, j]])
+            .sum::<f64>()
+            / (n - 1) as f64
     }
 
     fn row_mean(&self, matrix: &Array2<f64>, id: &str) -> f64 {
-        let Some(i) = self.index_of(id) else { return 0.0 };
+        let Some(i) = self.index_of(id) else {
+            return 0.0;
+        };
         let n = self.ids.len();
         if n < 2 {
             return 0.0;
         }
-        (0..n).filter(|j| *j != i).map(|j| matrix[[i, j]]).sum::<f64>() / (n - 1) as f64
+        (0..n)
+            .filter(|j| *j != i)
+            .map(|j| matrix[[i, j]])
+            .sum::<f64>()
+            / (n - 1) as f64
     }
 
     /// Live connections into or out of this agent.
     pub fn degree(&self, id: &str) -> usize {
-        let Some(position) = self.index_of(id) else { return 0 };
+        let Some(position) = self.index_of(id) else {
+            return 0;
+        };
         let n = self.ids.len();
         (0..n)
             .filter(|other| {
@@ -355,7 +370,10 @@ impl TrustGraph {
     pub fn isolated(&self) -> Vec<String> {
         self.ids
             .iter()
-            .filter(|id| self.inbound_weight(id) < ISOLATION_WEIGHT && self.inbound_trust(id) < ISOLATION_TRUST)
+            .filter(|id| {
+                self.inbound_weight(id) < ISOLATION_WEIGHT
+                    && self.inbound_trust(id) < ISOLATION_TRUST
+            })
             .cloned()
             .collect()
     }
@@ -374,10 +392,17 @@ impl TrustGraph {
     /// Ranked by `W_ij · T_ij`: the mesh prefers partners it both trusts and can
     /// afford to reach.
     pub fn top_partners(&self, id: &str, k: usize) -> Vec<(String, f64)> {
-        let Some(i) = self.index_of(id) else { return Vec::new() };
+        let Some(i) = self.index_of(id) else {
+            return Vec::new();
+        };
         let mut partners: Vec<(String, f64)> = (0..self.ids.len())
             .filter(|j| *j != i)
-            .map(|j| (self.ids[j].clone(), self.weight[[i, j]] * self.trust[[i, j]]))
+            .map(|j| {
+                (
+                    self.ids[j].clone(),
+                    self.weight[[i, j]] * self.trust[[i, j]],
+                )
+            })
             .collect();
         partners.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         partners.truncate(k);
@@ -423,8 +448,18 @@ impl TrustGraph {
     pub fn to_view(&self) -> TrustMatrixView {
         TrustMatrixView {
             ids: self.ids.clone(),
-            trust: self.trust.rows().into_iter().map(|row| row.to_vec()).collect(),
-            weight: self.weight.rows().into_iter().map(|row| row.to_vec()).collect(),
+            trust: self
+                .trust
+                .rows()
+                .into_iter()
+                .map(|row| row.to_vec())
+                .collect(),
+            weight: self
+                .weight
+                .rows()
+                .into_iter()
+                .map(|row| row.to_vec())
+                .collect(),
         }
     }
 }
@@ -455,8 +490,16 @@ mod tests {
         let graph = cohort();
         assert_eq!(graph.len(), 3);
         assert_eq!(graph.trust_between("planner", "coder"), INITIAL_TRUST);
-        assert_eq!(graph.trust_between("planner", "planner"), 0.0, "no self-trust");
-        assert_eq!(graph.trust_between("planner", "ghost"), 0.0, "unknown agents are unknown");
+        assert_eq!(
+            graph.trust_between("planner", "planner"),
+            0.0,
+            "no self-trust"
+        );
+        assert_eq!(
+            graph.trust_between("planner", "ghost"),
+            0.0,
+            "unknown agents are unknown"
+        );
     }
 
     #[test]
@@ -495,7 +538,11 @@ mod tests {
             graph.record("coder", "critic", false);
             graph.settle(&coefficients, 1.0);
         }
-        assert!(graph.hubs().contains(&"coder".to_string()), "hubs: {:?}", graph.hubs());
+        assert!(
+            graph.hubs().contains(&"coder".to_string()),
+            "hubs: {:?}",
+            graph.hubs()
+        );
         assert!(graph.inbound_trust("coder") > graph.inbound_trust("critic"));
     }
 
@@ -509,7 +556,10 @@ mod tests {
             graph.settle(&coefficients, 1.0);
         }
 
-        assert!(graph.idle().contains(&"critic".to_string()), "no traffic flows to it");
+        assert!(
+            graph.idle().contains(&"critic".to_string()),
+            "no traffic flows to it"
+        );
         assert!(
             !graph.isolated().contains(&"critic".to_string()),
             "but the mesh has not judged it, so it must stay eligible for work"
@@ -549,7 +599,9 @@ mod tests {
         graph.record("coder", "critic", false);
         let settlement = graph.settle(&coefficients, 1.0);
         assert_eq!(settlement.interactions, 3.0);
-        assert!(settlement.collaboration_efficiency > 0.0 && settlement.collaboration_efficiency < 1.0);
+        assert!(
+            settlement.collaboration_efficiency > 0.0 && settlement.collaboration_efficiency < 1.0
+        );
         assert!(settlement.updated_pairs > 0);
     }
 
@@ -564,7 +616,10 @@ mod tests {
         production.record("planner", "coder", true);
         production.settle(&coefficients, 1.0);
 
-        assert!(sandbox.trust_between("planner", "coder") < production.trust_between("planner", "coder"));
+        assert!(
+            sandbox.trust_between("planner", "coder")
+                < production.trust_between("planner", "coder")
+        );
     }
 
     #[test]
@@ -640,7 +695,11 @@ mod tests {
             graph.record("critic", "coder", false);
             graph.settle(&coefficients, 1.0);
         }
-        assert_eq!(graph.degree("critic"), 0, "a fully distrusted agent has no live links");
+        assert_eq!(
+            graph.degree("critic"),
+            0,
+            "a fully distrusted agent has no live links"
+        );
         assert_eq!(graph.degree("ghost"), 0);
     }
 
@@ -648,7 +707,10 @@ mod tests {
     fn recording_unknown_agents_is_rejected_not_silently_dropped() {
         let mut graph = cohort();
         assert!(!graph.record("planner", "ghost", true));
-        assert!(!graph.record("planner", "planner", true), "self-collaboration is meaningless");
+        assert!(
+            !graph.record("planner", "planner", true),
+            "self-collaboration is meaningless"
+        );
         assert!(graph.record("planner", "coder", true));
         assert!(!graph.set_latency("planner", "ghost", 0.5));
     }

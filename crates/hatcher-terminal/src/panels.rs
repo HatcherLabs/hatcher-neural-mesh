@@ -27,7 +27,12 @@ impl Rect {
 
     /// The drawable area inside the frame border.
     pub fn inner(&self) -> Rect {
-        Rect::new(self.x + 2, self.y + 1, self.w.saturating_sub(4), self.h.saturating_sub(2))
+        Rect::new(
+            self.x + 2,
+            self.y + 1,
+            self.w.saturating_sub(4),
+            self.h.saturating_sub(2),
+        )
     }
 
     pub fn center_x(&self) -> f64 {
@@ -45,7 +50,14 @@ impl Rect {
 /// of size, and every node keeps a stable position between frames — the graph
 /// rotates, it does not reshuffle.
 pub fn node_graph(canvas: &mut Canvas, rect: Rect, observation: &Observation, camera: &Camera) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "MESH NODE GRAPH", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "MESH NODE GRAPH",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 8 || inner.h < 4 || observation.agents.is_empty() {
         return;
@@ -57,7 +69,9 @@ pub fn node_graph(canvas: &mut Canvas, rect: Rect, observation: &Observation, ca
     let cx = rect.center_x();
     let cy = rect.center_y();
     let count = observation.agents.len();
-    let positions: Vec<Vec3> = (0..count).map(|index| fibonacci_sphere(index, count, 3.1)).collect();
+    let positions: Vec<Vec3> = (0..count)
+        .map(|index| fibonacci_sphere(index, count, 3.1))
+        .collect();
 
     // `W_ij` grows by saturating increments and spends the mesh's whole working
     // life well below `1.0` — a fresh cohort sits near `0.1` and a settled one
@@ -66,11 +80,18 @@ pub fn node_graph(canvas: &mut Canvas, rect: Rect, observation: &Observation, ca
     // none. Rank each edge against the strongest link currently in the graph
     // instead: the panel shows the mesh's own backbone at any stage of its
     // development, and keeps pruning as the graph organizes itself.
-    let peak = observation.edges.iter().map(|edge| edge.weight).fold(0.0_f64, f64::max);
+    let peak = observation
+        .edges
+        .iter()
+        .map(|edge| edge.weight)
+        .fold(0.0_f64, f64::max);
 
     // Edges first, so nodes always sit on top of their own connections.
     for edge in &observation.edges {
-        let (Some(from), Some(to)) = (index_of(observation, &edge.from), index_of(observation, &edge.to)) else {
+        let (Some(from), Some(to)) = (
+            index_of(observation, &edge.from),
+            index_of(observation, &edge.to),
+        ) else {
             continue;
         };
         // `from >= to` drops the mirrored half of a symmetric graph.
@@ -132,12 +153,23 @@ fn fibonacci_sphere(index: usize, count: usize, radius: f64) -> Vec3 {
     let y = 1.0 - 2.0 * (i + 0.5) / count;
     let r = (1.0 - y * y).max(0.0).sqrt();
     let theta = i * 2.399_963_23; // golden angle
-    Vec3::new(radius * r * theta.cos(), radius * y, radius * r * theta.sin())
+    Vec3::new(
+        radius * r * theta.cos(),
+        radius * y,
+        radius * r * theta.sin(),
+    )
 }
 
 /// The trust matrix `T_ij` as a heat grid.
 pub fn trust_matrix(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "TRUST MATRIX T(i,j)", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "TRUST MATRIX T(i,j)",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 6 || inner.h < 3 {
         return;
@@ -166,7 +198,11 @@ pub fn trust_matrix(canvas: &mut Canvas, rect: Rect, observation: &Observation) 
             } else {
                 theme::trust_ramp(value)
             };
-            let ch = if row == column { '·' } else { theme::glyph(value) };
+            let ch = if row == column {
+                '·'
+            } else {
+                theme::glyph(value)
+            };
             canvas.put(x, y, ch, colour);
             canvas.put(x + 1, y, ch, colour);
         }
@@ -187,7 +223,14 @@ fn lookup_trust(observation: &Observation, from: usize, to: usize) -> f64 {
 
 /// The ten equations with their live values, as labelled meters.
 pub fn equations(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "HAMNS EQUATIONS", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "HAMNS EQUATIONS",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 24 || inner.h < 3 {
         return;
@@ -202,7 +245,12 @@ pub fn equations(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
     let mean_capability = if observation.agents.is_empty() {
         0.0
     } else {
-        observation.agents.iter().map(|a| a.capability_norm).sum::<f64>() / observation.agents.len() as f64
+        observation
+            .agents
+            .iter()
+            .map(|a| a.capability_norm)
+            .sum::<f64>()
+            / observation.agents.len() as f64
     };
     let priority = observation
         .last_trace
@@ -215,12 +263,24 @@ pub fn equations(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
         ("2 A_i capability", mean_capability, "I·S·P·C·M"),
         ("3 A  mesh", observation.intelligence_norm(), "ΣA+γΣAAW"),
         ("4 T  trust", observation.mean_trust, "T+λS−μE"),
-        ("5 P  priority", (priority / (priority + 1.0)).clamp(0.0, 1.0), "(U·B·I)/(C+τ)"),
+        (
+            "5 P  priority",
+            (priority / (priority + 1.0)).clamp(0.0, 1.0),
+            "(U·B·I)/(C+τ)",
+        ),
         ("6 M  memory", delta.learning.clamp(0.0, 1.0), "M+ηK−δR"),
-        ("7 C  confidence", observation.mean_confidence, "C+σ·ok−ρ·err"),
+        (
+            "7 C  confidence",
+            observation.mean_confidence,
+            "C+σ·ok−ρ·err",
+        ),
         ("8 S  special.", mean_capability, "S+κ·exp−ω·obs"),
         ("9 W  plasticity", observation.intensity(), "W+φT−ψ·lat"),
-        ("10 R resource", 1.0 - delta.failure.clamp(0.0, 1.0), "P/(E+L)"),
+        (
+            "10 R resource",
+            1.0 - delta.failure.clamp(0.0, 1.0),
+            "P/(E+L)",
+        ),
     ];
 
     let label_w = 18usize;
@@ -234,7 +294,13 @@ pub fn equations(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
         canvas.text_clipped(inner.x, y, label, theme::TEXT, label_w);
         canvas.bar(inner.x + label_w as i64, y, bar_w, *value, theme::heat);
         let readout = format!(" {:.2}", value);
-        canvas.text_clipped(inner.x + (label_w + bar_w) as i64, y, &readout, theme::LABEL, 6);
+        canvas.text_clipped(
+            inner.x + (label_w + bar_w) as i64,
+            y,
+            &readout,
+            theme::LABEL,
+            6,
+        );
 
         let formula_x = inner.x + (label_w + bar_w + 6) as i64;
         let remaining = inner.w.saturating_sub(label_w + bar_w + 6);
@@ -246,14 +312,27 @@ pub fn equations(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
 
 /// The ten-station pipeline as a flow strip, showing where the last trace went.
 pub fn pipeline(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "PIPELINE TRACE", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "PIPELINE TRACE",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 12 || inner.h < 2 {
         return;
     }
 
     let Some(trace) = observation.last_trace.as_ref() else {
-        canvas.text_clipped(inner.x, inner.y, "idle — no trace yet", theme::LABEL, inner.w);
+        canvas.text_clipped(
+            inner.x,
+            inner.y,
+            "idle — no trace yet",
+            theme::LABEL,
+            inner.w,
+        );
         return;
     };
 
@@ -291,7 +370,13 @@ pub fn roster(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
         return;
     }
 
-    canvas.text_clipped(inner.x, inner.y, "AGENT        CAP   TRUST  ACT   OK/TRY", theme::FRAME, inner.w);
+    canvas.text_clipped(
+        inner.x,
+        inner.y,
+        "AGENT        CAP   TRUST  ACT   OK/TRY",
+        theme::FRAME,
+        inner.w,
+    );
 
     for (index, agent) in observation.ranked().iter().enumerate() {
         let y = inner.y + 1 + index as i64;
@@ -325,7 +410,14 @@ pub fn roster(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
 /// on numbers that were only ever declarations. So provenance and measured share go
 /// first, above the verb map, and a rehearsing mesh is labelled as one.
 pub fn contract(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "INTEGRATION CONTRACT", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "INTEGRATION CONTRACT",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 24 || inner.h < 3 {
         return;
@@ -357,35 +449,71 @@ pub fn contract(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
     line(
         canvas,
         &mut row,
-        format!("contract v{}   open runs {}", observation.contract_version, observation.open_runs),
+        format!(
+            "contract v{}   open runs {}",
+            observation.contract_version, observation.open_runs
+        ),
         theme::TEXT,
     );
-    line(canvas, &mut row, format!("outcomes  {provenance}"), provenance_colour);
+    line(
+        canvas,
+        &mut row,
+        format!("outcomes  {provenance}"),
+        provenance_colour,
+    );
     line(
         canvas,
         &mut row,
         format!(
             "measured  {:.0}% of cohort ({}/{})",
             measured * 100.0,
-            observation.agents.iter().filter(|a| a.is_measured()).count(),
+            observation
+                .agents
+                .iter()
+                .filter(|a| a.is_measured())
+                .count(),
             observation.agents.len()
         ),
-        if measured > 0.0 { theme::GOOD } else { theme::WARN },
+        if measured > 0.0 {
+            theme::GOOD
+        } else {
+            theme::WARN
+        },
     );
     // The head is above the digests because it is the one line here an operator can act
     // on: a mesh silently running the built-in network after a failed policy load looks
     // exactly like one running the policy, and the decisions differ.
     let (head_text, head_colour) = match observation.head.degraded.as_deref() {
         Some(_) => (
-            format!("{} (DEGRADED — not the requested head)", observation.head.name),
+            format!(
+                "{} (DEGRADED — not the requested head)",
+                observation.head.name
+            ),
             theme::BAD,
         ),
-        None if observation.head.is_policy() => (format!("{} (policy)", observation.head.name), theme::GOOD),
+        None if observation.head.is_policy() => {
+            (format!("{} (policy)", observation.head.name), theme::GOOD)
+        }
         None => (format!("{} (built-in)", observation.head.name), theme::TEXT),
     };
-    line(canvas, &mut row, format!("head      {head_text}"), head_colour);
-    line(canvas, &mut row, format!("mesh      {digest}…"), theme::LABEL);
-    line(canvas, &mut row, format!("trace     {trace_digest}…"), theme::LABEL);
+    line(
+        canvas,
+        &mut row,
+        format!("head      {head_text}"),
+        head_colour,
+    );
+    line(
+        canvas,
+        &mut row,
+        format!("mesh      {digest}…"),
+        theme::LABEL,
+    );
+    line(
+        canvas,
+        &mut row,
+        format!("trace     {trace_digest}…"),
+        theme::LABEL,
+    );
     line(
         canvas,
         &mut row,
@@ -413,14 +541,27 @@ pub fn contract(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
 
 /// The last run's stage outcomes, on the four axes a caller actually reports.
 pub fn outcomes(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "STAGE OUTCOMES", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "STAGE OUTCOMES",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 28 || inner.h < 2 {
         return;
     }
 
     let Some(trace) = observation.last_trace.as_ref() else {
-        canvas.text_clipped(inner.x, inner.y, "idle — no outcomes yet", theme::LABEL, inner.w);
+        canvas.text_clipped(
+            inner.x,
+            inner.y,
+            "idle — no outcomes yet",
+            theme::LABEL,
+            inner.w,
+        );
         return;
     };
 
@@ -432,7 +573,10 @@ pub fn outcomes(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
         inner.w,
     );
 
-    let staffed = trace.stages.iter().filter(|record| record.stage.is_staffed());
+    let staffed = trace
+        .stages
+        .iter()
+        .filter(|record| record.stage.is_staffed());
     for (index, record) in staffed.enumerate() {
         let y = inner.y + 1 + index as i64;
         if index + 1 >= inner.h {
@@ -474,16 +618,31 @@ pub fn outcomes(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
             trace.total_latency_ms(),
             trace.total_cost(),
             trace.mean_quality(),
-            if trace.verified { "VERIFIED" } else { "UNVERIFIED" }
+            if trace.verified {
+                "VERIFIED"
+            } else {
+                "UNVERIFIED"
+            }
         );
-        let colour = if trace.verified { theme::GOOD } else { theme::WARN };
+        let colour = if trace.verified {
+            theme::GOOD
+        } else {
+            theme::WARN
+        };
         canvas.text_clipped(inner.x, summary_y, &summary, colour, inner.w);
     }
 }
 
 /// Mesh routing against the baselines, on quality, cost, latency, and reliability.
 pub fn benchmark(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "ROUTING BENCHMARK", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "ROUTING BENCHMARK",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 40 || inner.h < 3 {
         return;
@@ -526,7 +685,11 @@ pub fn benchmark(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
             break;
         }
         let winner = scorecard.policy == report.winner;
-        let colour = if winner { theme::ACCENT } else { theme::heat(scorecard.mean_quality) };
+        let colour = if winner {
+            theme::ACCENT
+        } else {
+            theme::heat(scorecard.mean_quality)
+        };
 
         let line = format!(
             "{}{:<11} {:.2}  {:>4.0}%  {:>4.0}%  {:>7}  {:>6.0}ms {:.3}",
@@ -549,7 +712,13 @@ pub fn benchmark(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
     // numbers cannot tell whether the router earned them or the cohort did.
     let delta_y = inner.y + 3 + report.scorecards.len() as i64;
     if (delta_y - inner.y) as usize + 1 < inner.h {
-        canvas.text_clipped(inner.x, delta_y, "VS BASELINE  QUALITY  RELIAB  COST  LATENCY", theme::FRAME, inner.w);
+        canvas.text_clipped(
+            inner.x,
+            delta_y,
+            "VS BASELINE  QUALITY  RELIAB  COST  LATENCY",
+            theme::FRAME,
+            inner.w,
+        );
         for (index, delta) in report.deltas.iter().enumerate() {
             let y = delta_y + 1 + index as i64;
             if (y - inner.y) as usize >= inner.h {
@@ -563,16 +732,33 @@ pub fn benchmark(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
                 delta.reliability_gain * 100.0,
                 delta.cost_saving * 100.0,
                 delta.latency_saving * 100.0,
-                if delta.dominates() { "  ✦ dominates" } else { "" }
+                if delta.dominates() {
+                    "  ✦ dominates"
+                } else {
+                    ""
+                }
             );
-            canvas.text_clipped(inner.x, y, &line, if good { theme::GOOD } else { theme::LABEL }, inner.w);
+            canvas.text_clipped(
+                inner.x,
+                y,
+                &line,
+                if good { theme::GOOD } else { theme::LABEL },
+                inner.w,
+            );
         }
     }
 }
 
 /// What the cohort costs and how fast it is — declared versus measured.
 pub fn economics(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
-    canvas.frame(rect.x, rect.y, rect.w, rect.h, "COST & LATENCY", theme::FRAME);
+    canvas.frame(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        "COST & LATENCY",
+        theme::FRAME,
+    );
     let inner = rect.inner();
     if inner.w < 34 || inner.h < 2 {
         return;
@@ -610,7 +796,11 @@ pub fn economics(canvas: &mut Canvas, rect: Rect, observation: &Observation) {
         );
         // A declared number is a guess someone typed in. Dimming it is the difference
         // between reading this panel as evidence and reading it as a plan.
-        let colour = if agent.is_measured() { theme::TEXT } else { theme::LABEL };
+        let colour = if agent.is_measured() {
+            theme::TEXT
+        } else {
+            theme::LABEL
+        };
         canvas.text_clipped(inner.x, y, &line, colour, inner.w);
     }
 
@@ -649,7 +839,11 @@ pub fn tabs(canvas: &mut Canvas, width: usize, active: crate::dashboard::View, y
         if remaining < label.chars().count() + 1 {
             break;
         }
-        let colour = if selected { theme::ACCENT } else { theme::LABEL };
+        let colour = if selected {
+            theme::ACCENT
+        } else {
+            theme::LABEL
+        };
         canvas.text_clipped(x, y, &label, colour, remaining);
         x += label.chars().count() as i64 + 1;
     }
@@ -657,8 +851,16 @@ pub fn tabs(canvas: &mut Canvas, width: usize, active: crate::dashboard::View, y
 
 /// The header strip: the numbers you want without reading a panel.
 pub fn header(canvas: &mut Canvas, width: usize, observation: &Observation, frame: u64) {
-    let status = if observation.active { "● MESH ACTIVE" } else { "○ MESH IDLE" };
-    let status_colour = if observation.active { theme::GOOD } else { theme::LABEL };
+    let status = if observation.active {
+        "● MESH ACTIVE"
+    } else {
+        "○ MESH IDLE"
+    };
+    let status_colour = if observation.active {
+        theme::GOOD
+    } else {
+        theme::LABEL
+    };
     canvas.text(1, 0, status, status_colour);
 
     let line = format!(
@@ -712,8 +914,15 @@ mod tests {
             draw(&mut canvas, Rect::new(0, 0, 80, 24), &observation);
             assert!(drew_something(&canvas), "{name} drew nothing");
             let plain = canvas.render_plain();
-            assert_eq!(plain.lines().count(), 24, "{name} changed the canvas height");
-            assert!(plain.lines().all(|l| l.chars().count() == 80), "{name} overflowed");
+            assert_eq!(
+                plain.lines().count(),
+                24,
+                "{name} changed the canvas height"
+            );
+            assert!(
+                plain.lines().all(|l| l.chars().count() == 80),
+                "{name} overflowed"
+            );
         }
 
         let mut canvas = Canvas::new(80, 24);
@@ -761,7 +970,10 @@ mod tests {
         let a = fibonacci_sphere(3, 9, 3.0);
         let b = fibonacci_sphere(3, 9, 3.0);
         assert_eq!(a, b, "placement must not move between frames");
-        assert!((a.length() - 3.0).abs() < 1e-9, "points must lie on the sphere");
+        assert!(
+            (a.length() - 3.0).abs() < 1e-9,
+            "points must lie on the sphere"
+        );
         assert!(fibonacci_sphere(0, 9, 3.0) != fibonacci_sphere(1, 9, 3.0));
     }
 
@@ -777,10 +989,18 @@ mod tests {
     #[test]
     fn the_node_graph_actually_draws_its_edges() {
         let observation = observation(true);
-        assert!(!observation.edges.is_empty(), "the cohort must be connected");
+        assert!(
+            !observation.edges.is_empty(),
+            "the cohort must be connected"
+        );
 
         let mut canvas = Canvas::new(60, 24);
-        node_graph(&mut canvas, Rect::new(0, 0, 60, 24), &observation, &Camera::default());
+        node_graph(
+            &mut canvas,
+            Rect::new(0, 0, 60, 24),
+            &observation,
+            &Camera::default(),
+        );
 
         let drawn = canvas.render_plain();
         let links = drawn.chars().filter(|c| *c == '·' || *c == '═').count();
@@ -797,10 +1017,18 @@ mod tests {
         }
 
         let mut canvas = Canvas::new(60, 24);
-        node_graph(&mut canvas, Rect::new(0, 0, 60, 24), &observation, &Camera::default());
+        node_graph(
+            &mut canvas,
+            Rect::new(0, 0, 60, 24),
+            &observation,
+            &Camera::default(),
+        );
 
         let drawn = canvas.render_plain();
-        assert!(drawn.contains('·') || drawn.contains('═'), "strong links survive");
+        assert!(
+            drawn.contains('·') || drawn.contains('═'),
+            "strong links survive"
+        );
         // Every edge surviving would mean the filter had stopped discriminating.
         let links = drawn.chars().filter(|c| *c == '·' || *c == '═').count();
         assert!(links < drawn.chars().filter(|c| !c.is_whitespace()).count());
@@ -825,6 +1053,9 @@ mod tests {
         equations(&mut canvas, Rect::new(0, 0, 60, 14), &observation);
         let drawn = canvas.render_plain();
         assert!(drawn.contains("3 A  mesh"));
-        assert!(!drawn.contains("3 A  mesh        0.00"), "must not plot the ratio:\n{drawn}");
+        assert!(
+            !drawn.contains("3 A  mesh        0.00"),
+            "must not plot the ratio:\n{drawn}"
+        );
     }
 }

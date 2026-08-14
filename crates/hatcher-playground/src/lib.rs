@@ -13,14 +13,14 @@
 pub mod bench;
 
 pub use bench::{
-    contested_cohort, synthetic_recording, Benchmark, BenchmarkReport, PolicyDelta, PolicyScorecard,
-    RecordedRun, Replay, ReplayReport, RoutingPolicy, StageAgreement,
+    contested_cohort, synthetic_recording, Benchmark, BenchmarkReport, PolicyDelta,
+    PolicyScorecard, RecordedRun, Replay, ReplayReport, RoutingPolicy, StageAgreement,
 };
 
 use hatcher_core::{
-    AgentNode, AgentRole, CapabilityVector, ExecutionMode, HatcherRequest, HatcherResponse, MeshCoefficients,
-    MeshIntelligence, MeshSimulation, ModelSpec, PipelineTrace, ResourceProfile, TaskResult, TaskSpec,
-    TaskSubmission,
+    AgentNode, AgentRole, CapabilityVector, ExecutionMode, HatcherRequest, HatcherResponse,
+    MeshCoefficients, MeshIntelligence, MeshSimulation, ModelSpec, PipelineTrace, ResourceProfile,
+    TaskResult, TaskSpec, TaskSubmission,
 };
 use hatcher_neural::{default_cohort, pipeline, BackendKind, NeuralMesh};
 use serde::{Deserialize, Serialize};
@@ -79,7 +79,9 @@ impl AgentArena {
             ModelSpec::native_default(),
         );
         match self.mesh.degraded() {
-            Some(reason) => eprintln!("warning: could not load `{path}`, using the built-in head: {reason}"),
+            Some(reason) => {
+                eprintln!("warning: could not load `{path}`, using the built-in head: {reason}")
+            }
             None => println!("loaded decision head from {path}"),
         }
         self
@@ -98,7 +100,12 @@ impl AgentArena {
     }
 
     /// Run one bridge request and return the typed response.
-    pub fn evaluate(&mut self, agent_id: &str, prompt: &str, features: Vec<f64>) -> HatcherResponse {
+    pub fn evaluate(
+        &mut self,
+        agent_id: &str,
+        prompt: &str,
+        features: Vec<f64>,
+    ) -> HatcherResponse {
         let request = HatcherRequest::new(agent_id, AgentRole::Explorer, ExecutionMode::Controlled)
             .with_prompt(prompt)
             .with_features(features);
@@ -155,7 +162,12 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    pub fn new(name: impl Into<String>, domain: impl Into<String>, tasks: usize, difficulty: f64) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        domain: impl Into<String>,
+        tasks: usize,
+        difficulty: f64,
+    ) -> Self {
         Self {
             name: name.into(),
             domain: domain.into(),
@@ -250,7 +262,10 @@ impl ScenarioReport {
 }
 
 /// Run a scenario against a mesh, mutating it, and report what changed.
-pub fn run_scenario(mesh: &mut NeuralMesh, scenario: &Scenario) -> (ScenarioReport, Vec<PipelineTrace>) {
+pub fn run_scenario(
+    mesh: &mut NeuralMesh,
+    scenario: &Scenario,
+) -> (ScenarioReport, Vec<PipelineTrace>) {
     let omega_start = mesh.global.omega;
     let traces = pipeline::run_batch(mesh, &scenario.task_batch());
 
@@ -365,7 +380,8 @@ impl AgentBattle {
         let mut standings = Vec::with_capacity(self.contenders.len());
 
         for contender in &self.contenders {
-            let mut mesh = NeuralMesh::with_cohort(default_cohort()).with_coefficients(contender.coefficients);
+            let mut mesh =
+                NeuralMesh::with_cohort(default_cohort()).with_coefficients(contender.coefficients);
             let (report, _) = run_scenario(&mut mesh, &self.scenario);
             standings.push(Standing {
                 name: contender.name.clone(),
@@ -376,7 +392,11 @@ impl AgentBattle {
             });
         }
 
-        standings.sort_by(|a, b| b.omega.partial_cmp(&a.omega).unwrap_or(std::cmp::Ordering::Equal));
+        standings.sort_by(|a, b| {
+            b.omega
+                .partial_cmp(&a.omega)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let winner = standings
             .first()
             .map(|standing| standing.name.clone())
@@ -423,7 +443,11 @@ mod tests {
     #[test]
     fn an_arena_round_returns_a_decision() {
         let mut arena = AgentArena::new();
-        let json = arena.run_round("guardian-01", "protect the policy envelope", vec![0.2, 0.5, 0.8, 0.3]);
+        let json = arena.run_round(
+            "guardian-01",
+            "protect the policy envelope",
+            vec![0.2, 0.5, 0.8, 0.3],
+        );
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert!(parsed["decision"]["action"].is_string());
@@ -504,10 +528,19 @@ mod tests {
     #[test]
     fn a_frontier_scenario_grows_new_domain_expertise() {
         let mut mesh = NeuralMesh::default();
-        let before = mesh.node("coder-01").unwrap().mastery("distributed-systems");
+        let before = mesh
+            .node("coder-01")
+            .unwrap()
+            .mastery("distributed-systems");
         run_scenario(&mut mesh, &Scenario::frontier());
-        let after = mesh.node("coder-01").unwrap().mastery("distributed-systems");
-        assert!(after > before, "repeated work in a new domain must build mastery");
+        let after = mesh
+            .node("coder-01")
+            .unwrap()
+            .mastery("distributed-systems");
+        assert!(
+            after > before,
+            "repeated work in a new domain must build mastery"
+        );
     }
 
     #[test]
@@ -527,7 +560,10 @@ mod tests {
             weak.trust.trust_between("coder-01", "critic-01"),
             healthy.trust.trust_between("coder-01", "critic-01")
         );
-        assert!(weak.global.omega < healthy.global.omega, "and a weak link costs the mesh omega");
+        assert!(
+            weak.global.omega < healthy.global.omega,
+            "and a weak link costs the mesh omega"
+        );
     }
 
     #[test]
@@ -547,6 +583,9 @@ mod tests {
 
     #[test]
     fn battles_are_reproducible() {
-        assert_eq!(AgentBattle::new().run().winner, AgentBattle::new().run().winner);
+        assert_eq!(
+            AgentBattle::new().run().winner,
+            AgentBattle::new().run().winner
+        );
     }
 }

@@ -57,7 +57,8 @@ impl TaskConstraints {
 
     /// Whether an agent's expected latency and cost fit inside these limits.
     pub fn admits(&self, expected_latency_ms: f64, expected_cost: f64) -> bool {
-        self.max_latency_ms.map_or(true, |limit| expected_latency_ms <= limit)
+        self.max_latency_ms
+            .map_or(true, |limit| expected_latency_ms <= limit)
             && self.max_cost.map_or(true, |limit| expected_cost <= limit)
     }
 
@@ -68,7 +69,10 @@ impl TaskConstraints {
         ] {
             if let Some(value) = value {
                 if !value.is_finite() || value < 0.0 {
-                    return Err(ContractError::invalid(name, "must be finite and non-negative"));
+                    return Err(ContractError::invalid(
+                        name,
+                        "must be finite and non-negative",
+                    ));
                 }
             }
         }
@@ -100,7 +104,11 @@ pub struct TaskSpec {
 }
 
 impl TaskSpec {
-    pub fn new(id: impl Into<String>, description: impl Into<String>, domain: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        description: impl Into<String>,
+        domain: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             description: description.into(),
@@ -142,7 +150,12 @@ impl TaskSpec {
         }
         let count = self.features.len() as f64;
         let mean = self.features.iter().sum::<f64>() / count;
-        let variance = self.features.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / count;
+        let variance = self
+            .features
+            .iter()
+            .map(|value| (value - mean).powi(2))
+            .sum::<f64>()
+            / count;
 
         self.uncertainty = variance.sqrt().clamp(0.05, 1.0);
         self.budget = mean.clamp(0.05, 1.0);
@@ -409,7 +422,10 @@ pub struct PipelineTrace {
 impl PipelineTrace {
     /// Stages that failed, in order.
     pub fn failures(&self) -> Vec<&StageRecord> {
-        self.stages.iter().filter(|record| !record.success).collect()
+        self.stages
+            .iter()
+            .filter(|record| !record.success)
+            .collect()
     }
 
     /// Total resource cost of the run.
@@ -444,7 +460,11 @@ impl PipelineTrace {
 
     /// Fraction of staffed stations that succeeded.
     pub fn stage_success_rate(&self) -> f64 {
-        let staffed: Vec<&StageRecord> = self.stages.iter().filter(|record| record.stage.is_staffed()).collect();
+        let staffed: Vec<&StageRecord> = self
+            .stages
+            .iter()
+            .filter(|record| record.stage.is_staffed())
+            .collect();
         if staffed.is_empty() {
             return 0.0;
         }
@@ -497,7 +517,10 @@ mod tests {
             .with_features(vec![0.1, 0.9, 0.2, 0.8])
             .parsed_from_features();
 
-        assert!(task.uncertainty > 0.3, "a dispersed feature vector is an ambiguous request");
+        assert!(
+            task.uncertainty > 0.3,
+            "a dispersed feature vector is an ambiguous request"
+        );
         assert!((task.budget - 0.5).abs() < 1e-9);
         assert!((task.implementation_cost - 0.5).abs() < 1e-9);
     }
@@ -519,20 +542,32 @@ mod tests {
     fn staffed_stages_map_to_roles() {
         assert_eq!(PipelineStage::Code.preferred_role(), Some(AgentRole::Coder));
         assert!(!PipelineStage::OmegaUpdate.is_staffed());
-        assert_eq!(PipelineStage::ALL.iter().filter(|stage| stage.is_staffed()).count(), 5);
+        assert_eq!(
+            PipelineStage::ALL
+                .iter()
+                .filter(|stage| stage.is_staffed())
+                .count(),
+            5
+        );
     }
 
     #[test]
     fn an_absent_constraint_is_an_absence_of_opinion() {
         let open = TaskConstraints::default();
         assert!(open.is_open());
-        assert!(open.admits(1e9, 1e9), "saying nothing must not exclude anyone");
+        assert!(
+            open.admits(1e9, 1e9),
+            "saying nothing must not exclude anyone"
+        );
     }
 
     #[test]
     fn constraints_exclude_only_what_they_name() {
         let latency_only = TaskConstraints::latency(5_000.0);
-        assert!(latency_only.admits(4_000.0, 99.0), "cost is unconstrained here");
+        assert!(
+            latency_only.admits(4_000.0, 99.0),
+            "cost is unconstrained here"
+        );
         assert!(!latency_only.admits(6_000.0, 0.0));
 
         let both = TaskConstraints::latency(5_000.0).with_max_cost(0.5);
@@ -600,7 +635,13 @@ mod tests {
         }
     }
 
-    fn staffed_record(stage: PipelineStage, agent: &str, quality: f64, latency_ms: f64, cost: f64) -> StageRecord {
+    fn staffed_record(
+        stage: PipelineStage,
+        agent: &str,
+        quality: f64,
+        latency_ms: f64,
+        cost: f64,
+    ) -> StageRecord {
         StageRecord {
             stage,
             agent: Some(agent.to_string()),
@@ -609,7 +650,11 @@ mod tests {
             cost,
             quality,
             latency_ms,
-            error: if quality > 0.0 { ErrorClass::None } else { ErrorClass::Quality },
+            error: if quality > 0.0 {
+                ErrorClass::None
+            } else {
+                ErrorClass::Quality
+            },
             provenance: Some(OutcomeProvenance::Reported),
             note: String::new(),
         }
@@ -628,13 +673,19 @@ mod tests {
 
         assert!((trace.total_latency_ms() - 1_600.0).abs() < 1e-9);
         assert!((trace.total_cost() - 0.35).abs() < 1e-9);
-        assert!((trace.mean_quality() - 0.7).abs() < 1e-9, "bookkeeping must not dilute quality");
+        assert!(
+            (trace.mean_quality() - 0.7).abs() < 1e-9,
+            "bookkeeping must not dilute quality"
+        );
         assert!((trace.verify_quality() - 0.6).abs() < 1e-9);
     }
 
     #[test]
     fn an_unstaffed_mesh_reads_as_under_staffed_not_low_quality() {
-        let trace = trace_with(vec![StageRecord::unstaffed(PipelineStage::Code)], Vec::new());
+        let trace = trace_with(
+            vec![StageRecord::unstaffed(PipelineStage::Code)],
+            Vec::new(),
+        );
         assert_eq!(trace.mean_quality(), 0.0);
         assert_eq!(trace.stage_success_rate(), 0.0);
     }
@@ -649,7 +700,10 @@ mod tests {
         third.error = ErrorClass::RateLimit;
 
         let trace = trace_with(vec![first, second, third], Vec::new());
-        assert_eq!(trace.error_classes(), vec![ErrorClass::Timeout, ErrorClass::RateLimit]);
+        assert_eq!(
+            trace.error_classes(),
+            vec![ErrorClass::Timeout, ErrorClass::RateLimit]
+        );
     }
 
     #[test]
@@ -673,7 +727,10 @@ mod tests {
         );
         assert_eq!(trace.primary_agent(), Some("coder-01"));
 
-        let planning_only = trace_with(Vec::new(), vec![assignment(PipelineStage::Plan, "planner-01")]);
+        let planning_only = trace_with(
+            Vec::new(),
+            vec![assignment(PipelineStage::Plan, "planner-01")],
+        );
         assert_eq!(planning_only.primary_agent(), Some("planner-01"));
     }
 }

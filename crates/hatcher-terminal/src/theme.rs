@@ -13,7 +13,11 @@ impl Rgb {
     pub fn mix(self, other: Rgb, t: f64) -> Rgb {
         let t = t.clamp(0.0, 1.0);
         let lerp = |a: u8, b: u8| (a as f64 + (b as f64 - a as f64) * t).round() as u8;
-        Rgb(lerp(self.0, other.0), lerp(self.1, other.1), lerp(self.2, other.2))
+        Rgb(
+            lerp(self.0, other.0),
+            lerp(self.1, other.1),
+            lerp(self.2, other.2),
+        )
     }
 
     /// Scale toward black. Used for depth cueing in the 3D views.
@@ -57,7 +61,11 @@ pub fn heat(t: f64) -> Rgb {
         let (t1, c1) = pair[1];
         if t <= t1 {
             let span = t1 - t0;
-            let local = if span <= f64::EPSILON { 0.0 } else { (t - t0) / span };
+            let local = if span <= f64::EPSILON {
+                0.0
+            } else {
+                (t - t0) / span
+            };
             return c0.mix(c1, local);
         }
     }

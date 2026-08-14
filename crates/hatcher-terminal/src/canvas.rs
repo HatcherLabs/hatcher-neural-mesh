@@ -170,7 +170,15 @@ impl Canvas {
     ///
     /// Returns whether the label was drawn.
     #[allow(clippy::too_many_arguments)]
-    pub fn text_label(&mut self, x: i64, y: i64, s: &str, fg: Rgb, max_width: usize, depth: f64) -> bool {
+    pub fn text_label(
+        &mut self,
+        x: i64,
+        y: i64,
+        s: &str,
+        fg: Rgb,
+        max_width: usize,
+        depth: f64,
+    ) -> bool {
         if max_width == 0 || depth.is_nan() {
             return false;
         }
@@ -202,7 +210,15 @@ impl Canvas {
     /// its neighbours — a node on the far side of the funnel erases the label of
     /// one in front of it. Passing the node's own depth makes the nearer label win.
     #[allow(clippy::too_many_arguments)]
-    pub fn text_clipped_depth(&mut self, x: i64, y: i64, s: &str, fg: Rgb, max_width: usize, depth: f64) {
+    pub fn text_clipped_depth(
+        &mut self,
+        x: i64,
+        y: i64,
+        s: &str,
+        fg: Rgb,
+        max_width: usize,
+        depth: f64,
+    ) {
         if max_width == 0 {
             return;
         }
@@ -286,7 +302,11 @@ impl Canvas {
         let full = filled * w as f64;
         for column in 0..w {
             let local = (full - column as f64).clamp(0.0, 1.0);
-            let ch = if local <= 0.0 { '░' } else { theme::glyph(local) };
+            let ch = if local <= 0.0 {
+                '░'
+            } else {
+                theme::glyph(local)
+            };
             let colour = if local <= 0.0 {
                 theme::FRAME
             } else {
@@ -442,14 +462,36 @@ mod tests {
     fn biased_labels_beat_geometry_but_keep_their_own_order() {
         let mut canvas = Canvas::new(8, 1);
         // A near edge at depth 1.0 against a label belonging to a far node.
-        canvas.text_clipped_depth(0, 0, "near", theme::TEXT, 8, 40.0 - Canvas::LABEL_DEPTH_BIAS);
+        canvas.text_clipped_depth(
+            0,
+            0,
+            "near",
+            theme::TEXT,
+            8,
+            40.0 - Canvas::LABEL_DEPTH_BIAS,
+        );
         canvas.put_depth(0, 0, '═', theme::TEXT, 1.0);
-        assert_eq!(canvas.render_plain(), "near    ", "geometry must not overwrite a label");
+        assert_eq!(
+            canvas.render_plain(),
+            "near    ",
+            "geometry must not overwrite a label"
+        );
 
         canvas.clear();
         canvas.text_clipped_depth(0, 0, "far", theme::TEXT, 8, 40.0 - Canvas::LABEL_DEPTH_BIAS);
-        canvas.text_clipped_depth(0, 0, "nearer", theme::TEXT, 8, 2.0 - Canvas::LABEL_DEPTH_BIAS);
-        assert_eq!(canvas.render_plain(), "nearer  ", "labels still order among themselves");
+        canvas.text_clipped_depth(
+            0,
+            0,
+            "nearer",
+            theme::TEXT,
+            8,
+            2.0 - Canvas::LABEL_DEPTH_BIAS,
+        );
+        assert_eq!(
+            canvas.render_plain(),
+            "nearer  ",
+            "labels still order among themselves"
+        );
     }
 
     /// Regression: two overlapping labels used to leave a fragment of the loser
@@ -458,8 +500,22 @@ mod tests {
     fn an_occluded_label_is_dropped_whole_rather_than_fragmented() {
         let mut canvas = Canvas::new(20, 1);
         // Nearest first, which is the order the draw sites use.
-        assert!(canvas.text_label(3, 0, "planner", theme::TEXT, 10, 2.0 - Canvas::LABEL_DEPTH_BIAS));
-        assert!(!canvas.text_label(0, 0, "researcher", theme::TEXT, 10, 9.0 - Canvas::LABEL_DEPTH_BIAS));
+        assert!(canvas.text_label(
+            3,
+            0,
+            "planner",
+            theme::TEXT,
+            10,
+            2.0 - Canvas::LABEL_DEPTH_BIAS
+        ));
+        assert!(!canvas.text_label(
+            0,
+            0,
+            "researcher",
+            theme::TEXT,
+            10,
+            9.0 - Canvas::LABEL_DEPTH_BIAS
+        ));
 
         let drawn = canvas.render_plain();
         assert!(!drawn.contains("resplanner"), "no welded fragment: {drawn}");
@@ -469,8 +525,22 @@ mod tests {
     #[test]
     fn labels_that_do_not_collide_are_all_drawn() {
         let mut canvas = Canvas::new(24, 1);
-        assert!(canvas.text_label(0, 0, "alpha", theme::TEXT, 10, 2.0 - Canvas::LABEL_DEPTH_BIAS));
-        assert!(canvas.text_label(12, 0, "beta", theme::TEXT, 10, 9.0 - Canvas::LABEL_DEPTH_BIAS));
+        assert!(canvas.text_label(
+            0,
+            0,
+            "alpha",
+            theme::TEXT,
+            10,
+            2.0 - Canvas::LABEL_DEPTH_BIAS
+        ));
+        assert!(canvas.text_label(
+            12,
+            0,
+            "beta",
+            theme::TEXT,
+            10,
+            9.0 - Canvas::LABEL_DEPTH_BIAS
+        ));
         assert_eq!(canvas.render_plain().trim_end(), "alpha       beta");
     }
 
@@ -482,6 +552,10 @@ mod tests {
 
         canvas.clear();
         canvas.text_clipped_depth(0, 0, "abc", theme::TEXT, 0, 1.0);
-        assert_eq!(canvas.render_plain(), "          ", "zero width draws nothing");
+        assert_eq!(
+            canvas.render_plain(),
+            "          ",
+            "zero width draws nothing"
+        );
     }
 }

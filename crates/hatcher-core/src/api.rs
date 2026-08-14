@@ -84,7 +84,11 @@ pub struct HatcherRequest {
 }
 
 impl HatcherRequest {
-    pub fn new(agent_id: impl Into<String>, role: AgentRole, execution_mode: ExecutionMode) -> Self {
+    pub fn new(
+        agent_id: impl Into<String>,
+        role: AgentRole,
+        execution_mode: ExecutionMode,
+    ) -> Self {
         Self {
             agent_id: agent_id.into(),
             role,
@@ -280,7 +284,10 @@ mod tests {
 
         let task = request.to_task();
         assert_eq!(task.id, "task-agent-7");
-        assert_eq!(task.domain, "general", "an absent domain falls back to general");
+        assert_eq!(
+            task.domain, "general",
+            "an absent domain falls back to general"
+        );
         assert_eq!(task.execution_mode, ExecutionMode::Sandbox);
         assert!(task.uncertainty > 0.0);
     }

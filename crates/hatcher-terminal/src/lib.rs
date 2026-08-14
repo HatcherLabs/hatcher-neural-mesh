@@ -93,10 +93,20 @@ mod tests {
 
         let observation = Observation::capture(&mesh, &features, true, Some(trace));
         let mut canvas = Canvas::new(120, 34);
-        dashboard::draw(&mut canvas, View::Dashboard, &observation, &Camera::default(), 0.0, 0);
+        dashboard::draw(
+            &mut canvas,
+            View::Dashboard,
+            &observation,
+            &Camera::default(),
+            0.0,
+            0,
+        );
 
         let ansi = canvas.render();
-        assert!(ansi.contains("\x1b[38;2;"), "the observatory renders truecolor");
+        assert!(
+            ansi.contains("\x1b[38;2;"),
+            "the observatory renders truecolor"
+        );
         assert!(canvas.render_plain().contains("MESH ACTIVE"));
     }
 

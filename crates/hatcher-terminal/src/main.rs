@@ -150,8 +150,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--outcomes" => {
                 let raw = value()?;
-                options.outcomes =
-                    OutcomeMode::parse(&raw).ok_or_else(|| format!("unknown outcome mode: {raw}"))?;
+                options.outcomes = OutcomeMode::parse(&raw)
+                    .ok_or_else(|| format!("unknown outcome mode: {raw}"))?;
                 index += 2;
             }
             "--model" => {
@@ -178,8 +178,16 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 let (w, h) = raw
                     .split_once(['x', 'X'])
                     .ok_or_else(|| format!("--size wants WxH, got {raw}"))?;
-                options.width = w.trim().parse::<usize>().map_err(|e| e.to_string())?.clamp(20, 400);
-                options.height = h.trim().parse::<usize>().map_err(|e| e.to_string())?.clamp(8, 200);
+                options.width = w
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|e| e.to_string())?
+                    .clamp(20, 400);
+                options.height = h
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|e| e.to_string())?
+                    .clamp(8, 200);
                 index += 2;
             }
             "--frames" => {
@@ -187,7 +195,10 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 index += 2;
             }
             "--fps" => {
-                options.fps = value()?.parse::<u64>().map_err(|e| e.to_string())?.clamp(1, 120);
+                options.fps = value()?
+                    .parse::<u64>()
+                    .map_err(|e| e.to_string())?
+                    .clamp(1, 120);
                 index += 2;
             }
             "--spin" => {
@@ -258,13 +269,21 @@ fn synthesize_reports(
             let roll = (frame as usize + offset * 3) % 7;
             let outage = roll == 6;
             let failed = outage || (difficulty > 0.6 && roll == 0);
-            let quality = if failed { 0.10 } else { (0.95 - 0.35 * difficulty).clamp(0.0, 1.0) };
+            let quality = if failed {
+                0.10
+            } else {
+                (0.95 - 0.35 * difficulty).clamp(0.0, 1.0)
+            };
 
             let mut report = if failed {
                 StageOutcomeReport::failure(
                     planned.stage,
                     &planned.agent_id,
-                    if outage { ErrorClass::Infrastructure } else { ErrorClass::Quality },
+                    if outage {
+                        ErrorClass::Infrastructure
+                    } else {
+                        ErrorClass::Quality
+                    },
                 )
             } else {
                 StageOutcomeReport::success(planned.stage, &planned.agent_id, quality)
@@ -278,10 +297,16 @@ fn synthesize_reports(
 }
 
 /// Run one task through the mesh in whichever mode was asked for.
-fn advance(adapter: &mut MeshAdapter, task: &TaskSpec, mode: OutcomeMode, frame: u64) -> io::Result<()> {
+fn advance(
+    adapter: &mut MeshAdapter,
+    task: &TaskSpec,
+    mode: OutcomeMode,
+    frame: u64,
+) -> io::Result<()> {
     let envelope = envelope_for(task);
-    let contract_error =
-        |error: hatcher_core::ContractError| io::Error::new(io::ErrorKind::InvalidData, error.to_string());
+    let contract_error = |error: hatcher_core::ContractError| {
+        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+    };
 
     match mode {
         OutcomeMode::Simulated => {
@@ -327,9 +352,11 @@ fn run(options: Options) -> io::Result<()> {
     // Run once at startup rather than per frame: six policies over a full batch is a
     // benchmark, not a redraw, and re-running it every frame would make the observatory
     // spend all its time measuring instead of showing.
-    let benchmark: Option<BenchmarkReport> = options
-        .benchmark
-        .then(|| Benchmark::new().with_scenario(options.scenario.clone()).run());
+    let benchmark: Option<BenchmarkReport> = options.benchmark.then(|| {
+        Benchmark::new()
+            .with_scenario(options.scenario.clone())
+            .run()
+    });
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
@@ -363,7 +390,14 @@ fn run(options: Options) -> io::Result<()> {
         )
         .with_benchmark(benchmark.clone())
         .with_open_runs(adapter.open_runs().len());
-        dashboard::draw(&mut canvas, options.view, &observation, &camera, time, frame);
+        dashboard::draw(
+            &mut canvas,
+            options.view,
+            &observation,
+            &camera,
+            time,
+            frame,
+        );
 
         let painted = if options.plain {
             canvas.render_plain()
@@ -413,8 +447,23 @@ mod tests {
     #[test]
     fn flags_are_parsed() {
         let options = parse_args(&args(&[
-            "--view", "tornado", "--size", "80x20", "--frames", "3", "--fps", "10", "--once", "--plain",
-            "--scenario", "stress", "--spin", "1.25", "--outcomes", "reported", "--benchmark",
+            "--view",
+            "tornado",
+            "--size",
+            "80x20",
+            "--frames",
+            "3",
+            "--fps",
+            "10",
+            "--once",
+            "--plain",
+            "--scenario",
+            "stress",
+            "--spin",
+            "1.25",
+            "--outcomes",
+            "reported",
+            "--benchmark",
         ]))
         .expect("valid flags");
 
@@ -444,14 +493,20 @@ mod tests {
     fn the_contract_path_produces_a_trace_that_attests_to_reported_work() {
         let mut adapter = MeshAdapter::new();
         let task = Scenario::rehearsal().task_batch().remove(0);
-        advance(&mut adapter, &task, OutcomeMode::Reported, 1).expect("the contract loop must close");
+        advance(&mut adapter, &task, OutcomeMode::Reported, 1)
+            .expect("the contract loop must close");
 
-        let trace = adapter.last_trace().expect("a finalized run leaves a trace");
+        let trace = adapter
+            .last_trace()
+            .expect("a finalized run leaves a trace");
         assert!(
             trace.provenance.is_real(),
             "the reported mode has to actually go through the contract, not around it"
         );
-        assert!(adapter.open_runs().is_empty(), "and must not strand the run");
+        assert!(
+            adapter.open_runs().is_empty(),
+            "and must not strand the run"
+        );
         assert!(trace.total_latency_ms() > 0.0);
     }
 
@@ -473,7 +528,11 @@ mod tests {
         }
 
         assert!(
-            adapter.mesh.nodes.iter().all(|node| node.resources.is_observed()),
+            adapter
+                .mesh
+                .nodes
+                .iter()
+                .all(|node| node.resources.is_observed()),
             "every agent that ran should have a measured profile now"
         );
     }
@@ -481,7 +540,12 @@ mod tests {
     #[test]
     fn a_named_model_is_a_hard_requirement_not_a_preference() {
         let options = parse_args(&args(&[
-            "--once", "--plain", "--size", "40x12", "--model", "models/fixtures/nope.onnx",
+            "--once",
+            "--plain",
+            "--size",
+            "40x12",
+            "--model",
+            "models/fixtures/nope.onnx",
         ]))
         .unwrap();
         assert_eq!(options.model.as_deref(), Some("models/fixtures/nope.onnx"));

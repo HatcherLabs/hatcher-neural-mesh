@@ -134,7 +134,9 @@ mod tests {
         graph.add_edge("signal", "policy");
         assert!(graph.nodes.contains(&"signal".to_string()));
         assert!(graph.nodes.contains(&"policy".to_string()));
-        assert!(graph.edges.contains(&("signal".to_string(), "policy".to_string())));
+        assert!(graph
+            .edges
+            .contains(&("signal".to_string(), "policy".to_string())));
     }
 
     #[test]
@@ -150,10 +152,17 @@ mod tests {
     fn remember_wires_the_semantic_graph() {
         let mut graph = MemoryGraph::default();
         graph.remember(record("coder-1", true, 0.6));
-        assert!(graph.edges.contains(&("coder-1".to_string(), "rust".to_string())));
-        assert!(graph.edges.contains(&("rust".to_string(), "task-1".to_string())));
+        assert!(graph
+            .edges
+            .contains(&("coder-1".to_string(), "rust".to_string())));
+        assert!(graph
+            .edges
+            .contains(&("rust".to_string(), "task-1".to_string())));
         assert!((graph.knowledge_for("coder-1") - 0.6).abs() < 1e-12);
-        assert_eq!(graph.domain_mass().get("rust").copied().map(|m| m > 0.0), Some(true));
+        assert_eq!(
+            graph.domain_mass().get("rust").copied().map(|m| m > 0.0),
+            Some(true)
+        );
     }
 
     #[test]

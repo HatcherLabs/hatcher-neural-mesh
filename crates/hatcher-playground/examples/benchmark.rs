@@ -7,7 +7,11 @@
 use hatcher_playground::{synthetic_recording, Benchmark, Scenario};
 
 fn main() {
-    for scenario in [Scenario::rehearsal(), Scenario::stress(), Scenario::frontier()] {
+    for scenario in [
+        Scenario::rehearsal(),
+        Scenario::stress(),
+        Scenario::frontier(),
+    ] {
         let report = Benchmark::new().with_scenario(scenario).run();
         println!("{}\n", report.table());
     }

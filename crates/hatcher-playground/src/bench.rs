@@ -28,8 +28,8 @@
 use std::collections::BTreeMap;
 
 use hatcher_core::{
-    Assignment, ErrorClass, PipelineStage, PipelineTrace, PriorityBand, RuntimeCalibration, StageOutcomeReport,
-    TaskEnvelope, TaskSpec,
+    Assignment, ErrorClass, PipelineStage, PipelineTrace, PriorityBand, RuntimeCalibration,
+    StageOutcomeReport, TaskEnvelope, TaskSpec,
 };
 use hatcher_neural::{pipeline, router, BackendKind, NeuralMesh, RunInputs, SimulatedOutcomes};
 use serde::{Deserialize, Serialize};
@@ -109,16 +109,16 @@ impl RoutingPolicy {
     /// Every policy picks from the same candidate pool the mesh router builds — role
     /// eligibility, exclusions, and isolation are structural facts, not routing opinions.
     /// The policies differ only in which candidate they take.
-    fn choose(
-        &self,
-        mesh: &NeuralMesh,
-        stage: PipelineStage,
-        task: &TaskSpec,
-        band: PriorityBand,
-        taken: &[String],
-        calibration: &RuntimeCalibration,
-        turn: usize,
-    ) -> Option<Assignment> {
+    fn choose(&self, context: ChoiceContext<'_>) -> Option<Assignment> {
+        let ChoiceContext {
+            mesh,
+            stage,
+            task,
+            band,
+            taken,
+            calibration,
+            turn,
+        } = context;
         let ranked = router::rank_with(mesh, stage, task, band, taken, calibration);
         if ranked.is_empty() {
             return None;
@@ -152,6 +152,16 @@ impl RoutingPolicy {
 
         ranked.get(picked).cloned()
     }
+}
+
+struct ChoiceContext<'a> {
+    mesh: &'a NeuralMesh,
+    stage: PipelineStage,
+    task: &'a TaskSpec,
+    band: PriorityBand,
+    taken: &'a [String],
+    calibration: &'a RuntimeCalibration,
+    turn: usize,
 }
 
 /// Index of the highest-scoring entry, ties broken on agent id so the pick is stable.
@@ -189,7 +199,15 @@ fn plan_under(
     let mut planned = Vec::new();
 
     for (offset, stage) in STAFFED.into_iter().enumerate() {
-        if let Some(assignment) = policy.choose(mesh, stage, task, band, &taken, calibration, turn + offset) {
+        if let Some(assignment) = policy.choose(ChoiceContext {
+            mesh,
+            stage,
+            task,
+            band,
+            taken: &taken,
+            calibration,
+            turn: turn + offset,
+        }) {
             taken.push(assignment.agent_id.clone());
             planned.push(assignment);
         }
@@ -265,7 +283,10 @@ impl PolicyScorecard {
             }
         }
 
-        let mut latencies: Vec<f64> = traces.iter().map(|trace| trace.total_latency_ms()).collect();
+        let mut latencies: Vec<f64> = traces
+            .iter()
+            .map(|trace| trace.total_latency_ms())
+            .collect();
         latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let total_cost: f64 = traces.iter().map(|trace| trace.total_cost()).sum();
@@ -369,7 +390,10 @@ pub struct PolicyDelta {
 
 impl PolicyDelta {
     fn between(candidate: &PolicyScorecard, baseline: &PolicyScorecard) -> Self {
-        let cost_saving = match (candidate.cost_per_verified_task, baseline.cost_per_verified_task) {
+        let cost_saving = match (
+            candidate.cost_per_verified_task,
+            baseline.cost_per_verified_task,
+        ) {
             (Some(candidate_cost), Some(baseline_cost)) if baseline_cost > 0.0 => {
                 (baseline_cost - candidate_cost) / baseline_cost
             }
@@ -397,7 +421,10 @@ impl PolicyDelta {
 
     /// Whether this policy beat the baseline on every axis at once.
     pub fn dominates(&self) -> bool {
-        self.quality_gain > 0.0 && self.reliability_gain > 0.0 && self.cost_saving > 0.0 && self.latency_saving >= 0.0
+        self.quality_gain > 0.0
+            && self.reliability_gain > 0.0
+            && self.cost_saving > 0.0
+            && self.latency_saving >= 0.0
     }
 }
 
@@ -540,7 +567,11 @@ impl Benchmark {
     }
 
     /// Run a single policy and return its scorecard plus every trace.
-    pub fn run_policy(&self, policy: RoutingPolicy, tasks: &[TaskSpec]) -> (PolicyScorecard, Vec<PipelineTrace>) {
+    pub fn run_policy(
+        &self,
+        policy: RoutingPolicy,
+        tasks: &[TaskSpec],
+    ) -> (PolicyScorecard, Vec<PipelineTrace>) {
         // A head that will not load degrades to the built-in one rather than aborting the
         // benchmark; `PolicyScorecard::head` records which one actually ran, so a reader
         // is never comparing arms that silently used different models.
@@ -598,7 +629,9 @@ impl BenchmarkReport {
     }
 
     pub fn delta(&self, policy: RoutingPolicy) -> Option<&PolicyDelta> {
-        self.deltas.iter().find(|delta| delta.policy == policy.as_str())
+        self.deltas
+            .iter()
+            .find(|delta| delta.policy == policy.as_str())
     }
 
     /// A table for a terminal.
@@ -612,7 +645,10 @@ impl BenchmarkReport {
         for scorecard in &self.scorecards {
             lines.push(scorecard.headline());
         }
-        lines.push(format!("winner (verified output per unit cost): {}", self.winner));
+        lines.push(format!(
+            "winner (verified output per unit cost): {}",
+            self.winner
+        ));
         lines.join("\n")
     }
 }
@@ -654,7 +690,11 @@ impl RecordedRun {
         if self.outcomes.is_empty() {
             return 0.0;
         }
-        self.outcomes.iter().map(|outcome| outcome.quality).sum::<f64>() / self.outcomes.len() as f64
+        self.outcomes
+            .iter()
+            .map(|outcome| outcome.quality)
+            .sum::<f64>()
+            / self.outcomes.len() as f64
     }
 
     pub fn verified(&self) -> bool {
@@ -710,7 +750,11 @@ impl Replay {
     /// The mesh learns from the recording as it goes, exactly as it would have in
     /// production, so agreement measured at the end reflects a mesh that has seen the
     /// history — not one guessing cold.
-    pub fn evaluate(&self, cohort: Vec<hatcher_core::AgentNode>, calibration: RuntimeCalibration) -> ReplayReport {
+    pub fn evaluate(
+        &self,
+        cohort: Vec<hatcher_core::AgentNode>,
+        calibration: RuntimeCalibration,
+    ) -> ReplayReport {
         let mut mesh = NeuralMesh::with_cohort(cohort);
         let mut sequence = 0u64;
 
@@ -733,7 +777,9 @@ impl Replay {
                 let Some(recorded_agent) = run.agent_for(stage) else {
                     continue;
                 };
-                let Some(choice) = router::select_with(&mesh, stage, &task, band, &taken, &calibration) else {
+                let Some(choice) =
+                    router::select_with(&mesh, stage, &task, band, &taken, &calibration)
+                else {
                     continue;
                 };
                 taken.push(recorded_agent.to_string());
@@ -805,8 +851,10 @@ impl Replay {
             },
             agreed_success_rate: rate(agreed_success, agreements),
             disagreed_success_rate: rate(disagreed_success, comparable.saturating_sub(agreements)),
-            recorded_mean_quality: self.runs.iter().map(RecordedRun::mean_quality).sum::<f64>() / runs,
-            recorded_verified_rate: self.runs.iter().filter(|run| run.verified()).count() as f64 / runs,
+            recorded_mean_quality: self.runs.iter().map(RecordedRun::mean_quality).sum::<f64>()
+                / runs,
+            recorded_verified_rate: self.runs.iter().filter(|run| run.verified()).count() as f64
+                / runs,
             recorded_cost,
             recorded_latency_ms: recorded_latency,
             counterfactual_cost,
@@ -959,13 +1007,17 @@ pub fn contested_cohort() -> Vec<hatcher_core::AgentNode> {
                 .with_expertise("general", 0.70),
         );
         cohort.push(
-            AgentNode::new(format!("{name}-generalist"), format!("{name} generalist"), role)
-                .with_capability(CapabilityVector::new(0.78, 0.68, 0.76, 0.80, 0.70))
-                .with_resources(ResourceProfile::new(0.22, 0.18))
-                .with_confidence(0.60)
-                .with_expertise("rust", 0.62)
-                .with_expertise(speciality, 0.66)
-                .with_expertise("general", 0.74),
+            AgentNode::new(
+                format!("{name}-generalist"),
+                format!("{name} generalist"),
+                role,
+            )
+            .with_capability(CapabilityVector::new(0.78, 0.68, 0.76, 0.80, 0.70))
+            .with_resources(ResourceProfile::new(0.22, 0.18))
+            .with_confidence(0.60)
+            .with_expertise("rust", 0.62)
+            .with_expertise(speciality, 0.66)
+            .with_expertise("general", 0.74),
         );
         cohort.push(
             AgentNode::new(format!("{name}-novice"), format!("{name} novice"), role)
@@ -1014,7 +1066,11 @@ pub fn synthetic_recording(runs: usize, tier: &str) -> Replay {
 
                 // Deterministic and legible: every third run fails at the review stations.
                 let success = !(index % 3 == 0 && offset >= 3);
-                let quality = if success { 0.70 + 0.25 * (1.0 - difficulty) } else { 0.15 };
+                let quality = if success {
+                    0.70 + 0.25 * (1.0 - difficulty)
+                } else {
+                    0.15
+                };
 
                 let mut report = if success {
                     StageOutcomeReport::success(stage, &node.id, quality)
@@ -1024,7 +1080,9 @@ pub fn synthetic_recording(runs: usize, tier: &str) -> Replay {
                 report.confidence = quality;
                 Some(
                     report
-                        .with_latency_ms(node.resources.latency * 60_000.0 * (0.8 + 0.4 * difficulty))
+                        .with_latency_ms(
+                            node.resources.latency * 60_000.0 * (0.8 + 0.4 * difficulty),
+                        )
                         .with_cost(node.resources.energy * (0.9 + 0.2 * difficulty)),
                 )
             })
@@ -1061,7 +1119,12 @@ mod tests {
             agents.sort_unstable();
             let before = agents.len();
             agents.dedup();
-            assert_eq!(agents.len(), before, "{} double-booked an agent", policy.as_str());
+            assert_eq!(
+                agents.len(),
+                before,
+                "{} double-booked an agent",
+                policy.as_str()
+            );
         }
     }
 
@@ -1071,13 +1134,20 @@ mod tests {
         let calibration = RuntimeCalibration::default();
         // Give the coder a measured cost, and add a cheaper alternative.
         mesh.add_agent(
-            hatcher_core::AgentNode::new("coder-02", "budget coder", hatcher_core::AgentRole::Coder)
-                .with_resources(hatcher_core::ResourceProfile::new(0.02, 0.02)),
+            hatcher_core::AgentNode::new(
+                "coder-02",
+                "budget coder",
+                hatcher_core::AgentRole::Coder,
+            )
+            .with_resources(hatcher_core::ResourceProfile::new(0.02, 0.02)),
         );
 
         let task = quick_scenario().task_batch().remove(0);
         let planned = plan_under(RoutingPolicy::Cheapest, &mesh, &task, &calibration, 0);
-        let coding = planned.iter().find(|a| a.stage == PipelineStage::Code).unwrap();
+        let coding = planned
+            .iter()
+            .find(|a| a.stage == PipelineStage::Code)
+            .unwrap();
         assert_eq!(coding.agent_id, "coder-02");
     }
 
@@ -1095,7 +1165,9 @@ mod tests {
             );
         }
 
-        let benchmark = Benchmark::new().with_scenario(quick_scenario()).with_cohort(cohort);
+        let benchmark = Benchmark::new()
+            .with_scenario(quick_scenario())
+            .with_cohort(cohort);
         let tasks = benchmark.scenario.task_batch();
 
         let (round_robin, _) = benchmark.run_policy(RoutingPolicy::RoundRobin, &tasks);
@@ -1122,8 +1194,16 @@ mod tests {
             assert_eq!(scorecard.tasks, 12);
             assert!((0.0..=1.0).contains(&scorecard.mean_quality));
             assert!((0.0..=1.0).contains(&scorecard.verified_rate));
-            assert!(scorecard.total_cost > 0.0, "{} reported no cost", scorecard.policy);
-            assert!(scorecard.total_latency_ms > 0.0, "{} reported no latency", scorecard.policy);
+            assert!(
+                scorecard.total_cost > 0.0,
+                "{} reported no cost",
+                scorecard.policy
+            );
+            assert!(
+                scorecard.total_latency_ms > 0.0,
+                "{} reported no latency",
+                scorecard.policy
+            );
             assert!(scorecard.p95_latency_ms >= scorecard.p50_latency_ms);
         }
     }
@@ -1185,13 +1265,24 @@ mod tests {
         for stage in STAFFED {
             let role = stage.preferred_role().unwrap();
             let candidates = cohort.iter().filter(|node| node.role == role).count();
-            assert_eq!(candidates, 3, "{} has nothing to choose between", stage.as_str());
+            assert_eq!(
+                candidates,
+                3,
+                "{} has nothing to choose between",
+                stage.as_str()
+            );
         }
 
         // The tiers must actually differ on cost, or "cheapest" is the same policy as
         // "strongest" wearing a different name.
-        let expert = cohort.iter().find(|node| node.id == "coder-expert").unwrap();
-        let novice = cohort.iter().find(|node| node.id == "coder-novice").unwrap();
+        let expert = cohort
+            .iter()
+            .find(|node| node.id == "coder-expert")
+            .unwrap();
+        let novice = cohort
+            .iter()
+            .find(|node| node.id == "coder-novice")
+            .unwrap();
         assert!(expert.influence() > novice.influence());
         assert!(expert.resources.cost() > novice.resources.cost());
         assert!(expert.mastery("rust") > novice.mastery("rust"));
@@ -1203,12 +1294,30 @@ mod tests {
         let mesh = NeuralMesh::with_cohort(benchmark.cohort.clone());
         let task = benchmark.scenario.task_batch().remove(0);
 
-        let cheapest = plan_under(RoutingPolicy::Cheapest, &mesh, &task, &benchmark.calibration, 0);
-        let strongest = plan_under(RoutingPolicy::Strongest, &mesh, &task, &benchmark.calibration, 0);
+        let cheapest = plan_under(
+            RoutingPolicy::Cheapest,
+            &mesh,
+            &task,
+            &benchmark.calibration,
+            0,
+        );
+        let strongest = plan_under(
+            RoutingPolicy::Strongest,
+            &mesh,
+            &task,
+            &benchmark.calibration,
+            0,
+        );
 
         assert_ne!(
-            cheapest.iter().map(|a| a.agent_id.as_str()).collect::<Vec<_>>(),
-            strongest.iter().map(|a| a.agent_id.as_str()).collect::<Vec<_>>(),
+            cheapest
+                .iter()
+                .map(|a| a.agent_id.as_str())
+                .collect::<Vec<_>>(),
+            strongest
+                .iter()
+                .map(|a| a.agent_id.as_str())
+                .collect::<Vec<_>>(),
             "if these agree, the cohort has no cost/capability trade-off in it"
         );
     }
@@ -1220,12 +1329,19 @@ mod tests {
         let strongest = report.scorecard(RoutingPolicy::Strongest).unwrap();
         let delta = report.delta(RoutingPolicy::Strongest).unwrap();
 
-        assert!((delta.quality_gain - (strongest.mean_quality - baseline.mean_quality)).abs() < 1e-9);
-        if let (Some(candidate), Some(base)) =
-            (strongest.cost_per_verified_task, baseline.cost_per_verified_task)
-        {
+        assert!(
+            (delta.quality_gain - (strongest.mean_quality - baseline.mean_quality)).abs() < 1e-9
+        );
+        if let (Some(candidate), Some(base)) = (
+            strongest.cost_per_verified_task,
+            baseline.cost_per_verified_task,
+        ) {
             let cheaper = candidate < base;
-            assert_eq!(cheaper, delta.cost_saving > 0.0, "a saving must mean it cost less");
+            assert_eq!(
+                cheaper,
+                delta.cost_saving > 0.0,
+                "a saving must mean it cost less"
+            );
         }
     }
 
@@ -1239,7 +1355,11 @@ mod tests {
                 .scorecards
                 .remove(0)
         };
-        let working = Benchmark::new().with_scenario(quick_scenario()).run().scorecards.remove(0);
+        let working = Benchmark::new()
+            .with_scenario(quick_scenario())
+            .run()
+            .scorecards
+            .remove(0);
 
         let delta = PolicyDelta::between(&broke, &working);
         assert!(delta.cost_saving < 0.0, "failing cheaply is not a saving");
@@ -1310,7 +1430,10 @@ mod tests {
     fn every_arm_records_the_head_it_actually_ran() {
         let report = Benchmark::new().with_scenario(quick_scenario()).run();
         assert!(
-            report.scorecards.iter().all(|scorecard| scorecard.head == "native"),
+            report
+                .scorecards
+                .iter()
+                .all(|scorecard| scorecard.head == "native"),
             "arms that silently used different models must never be compared as if they had not"
         );
     }
@@ -1327,7 +1450,10 @@ mod tests {
             .run();
 
         assert_eq!(report.scorecards.len(), RoutingPolicy::ALL.len());
-        assert!(report.scorecards.iter().all(|scorecard| scorecard.head == "native"));
+        assert!(report
+            .scorecards
+            .iter()
+            .all(|scorecard| scorecard.head == "native"));
     }
 
     #[test]
@@ -1349,7 +1475,10 @@ mod tests {
 
         assert_eq!(encoded.lines().count(), 6, "one run per line, appendable");
         assert_eq!(Replay::from_jsonl(&encoded).unwrap(), replay);
-        assert!(Replay::from_jsonl("\n\n").unwrap().is_empty(), "blank lines are ignored");
+        assert!(
+            Replay::from_jsonl("\n\n").unwrap().is_empty(),
+            "blank lines are ignored"
+        );
     }
 
     #[test]
@@ -1358,7 +1487,10 @@ mod tests {
         let report = replay.evaluate(default_cohort(), RuntimeCalibration::default());
 
         assert_eq!(report.runs, 20);
-        assert_eq!(report.stages_compared, 100, "five stations over twenty runs");
+        assert_eq!(
+            report.stages_compared, 100,
+            "five stations over twenty runs"
+        );
         assert!((0.0..=1.0).contains(&report.routing_agreement));
         assert!(report.recorded_cost > 0.0);
         assert!(report.per_stage_agreement.len() == 5);
@@ -1402,7 +1534,10 @@ mod tests {
             RuntimeCalibration::default(),
         );
 
-        assert_eq!(report.routing_agreement, 0.0, "none of the recorded agents exist here");
+        assert_eq!(
+            report.routing_agreement, 0.0,
+            "none of the recorded agents exist here"
+        );
         assert!(
             !report.router_added_value(),
             "a mesh that knows none of the agents has not proven anything"

@@ -52,24 +52,27 @@ pub mod graph;
 pub mod memory;
 pub mod task;
 
-pub use agent::{AgentNode, AgentRole, CapabilityVector, ExecutionMode, NodeTelemetry, ResourceProfile};
+pub use agent::{
+    AgentNode, AgentRole, CapabilityVector, ExecutionMode, NodeTelemetry, ResourceProfile,
+};
 pub use api::{
-    AgentSummary, ApiRequest, ApiResponse, HatcherRequest, HatcherResponse, MeshAction, MeshAnalytics,
-    MeshConfigView, MeshGraphView, MeshOverview, NeuralSignal, TaskResult, TaskSubmission, TrustMatrixView,
+    AgentSummary, ApiRequest, ApiResponse, HatcherRequest, HatcherResponse, MeshAction,
+    MeshAnalytics, MeshConfigView, MeshGraphView, MeshOverview, NeuralSignal, TaskResult,
+    TaskSubmission, TrustMatrixView,
 };
 pub use coefficients::{CoefficientError, MeshCoefficients};
 pub use contract::{
-    AgentRegistration, Attribution, ContractError, DecisionHead, ErrorClass, HeadCommitment, MeshReceipt,
-    OutcomeProvenance, PlannedStage, RegistrationAck, RoutingPlan, RuntimeCalibration, StageOutcomeReport,
-    StageReceipt, TaskEnvelope, CONTRACT_VERSION,
+    AgentRegistration, Attribution, ContractError, DecisionHead, ErrorClass, HeadCommitment,
+    MeshReceipt, OutcomeProvenance, PlannedStage, RegistrationAck, RoutingPlan, RuntimeCalibration,
+    StageOutcomeReport, StageReceipt, TaskEnvelope, CONTRACT_VERSION,
 };
 pub use envelope::{canonical_digest, fold_digests, Envelope, CANONICAL_CODEC, SCHEMA_VERSION};
 pub use global::{GlobalState, OmegaDelta, OmegaLedger, OmegaRegime, OmegaSample};
 pub use graph::{MeshEdge, MeshIntelligence, MeshSimulation, MeshState, MeshStepResult};
 pub use memory::{MemoryGraph, MemoryRecord};
 pub use task::{
-    Assignment, PipelineStage, PipelineTrace, PriorityBand, PriorityScore, StageRecord, TaskConstraints,
-    TaskSpec, DEFERRED_THRESHOLD, IMMEDIATE_THRESHOLD,
+    Assignment, PipelineStage, PipelineTrace, PriorityBand, PriorityScore, StageRecord,
+    TaskConstraints, TaskSpec, DEFERRED_THRESHOLD, IMMEDIATE_THRESHOLD,
 };
 
 /// Shape and identity of an inference model bound to the mesh.
@@ -86,7 +89,13 @@ pub struct ModelSpec {
 }
 
 impl ModelSpec {
-    pub fn new(name: impl Into<String>, version: impl Into<String>, input_dim: usize, hidden_dim: usize, output_dim: usize) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        version: impl Into<String>,
+        input_dim: usize,
+        hidden_dim: usize,
+        output_dim: usize,
+    ) -> Self {
         Self {
             name: name.into(),
             version: version.into(),
@@ -129,7 +138,10 @@ mod tests {
     #[test]
     fn native_model_spec_matches_the_decision_head() {
         let spec = ModelSpec::native_default();
-        assert_eq!(spec.input_dim, 8, "four mesh statistics plus four task statistics");
+        assert_eq!(
+            spec.input_dim, 8,
+            "four mesh statistics plus four task statistics"
+        );
         assert_eq!(spec.output_dim, 4, "one logit per MeshAction");
     }
 }

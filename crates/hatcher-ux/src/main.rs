@@ -27,9 +27,9 @@ use std::thread;
 use std::time::Duration;
 
 use hatcher_core::{
-    AgentRegistration, AgentRole, ApiRequest, ApiResponse, ContractError, ExecutionMode, HatcherRequest,
-    MeshCoefficients, PipelineTrace, StageOutcomeReport, TaskEnvelope, TaskResult, TaskSubmission,
-    CONTRACT_VERSION,
+    AgentRegistration, AgentRole, ApiRequest, ApiResponse, ContractError, ExecutionMode,
+    HatcherRequest, MeshCoefficients, PipelineTrace, StageOutcomeReport, TaskEnvelope, TaskResult,
+    TaskSubmission, CONTRACT_VERSION,
 };
 use hatcher_neural::{pipeline, MeshAdapter};
 use hatcher_playground::{AgentArena, AgentBattle, Benchmark, Replay, Scenario};
@@ -165,11 +165,15 @@ impl From<&PipelineTrace> for TraceSummary {
 // HTTP API
 // ---------------------------------------------------------------------------
 
-fn with_state(state: AppState) -> impl Filter<Extract = (AppState,), Error = std::convert::Infallible> + Clone {
+fn with_state(
+    state: AppState,
+) -> impl Filter<Extract = (AppState,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || state.clone())
 }
 
-fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+fn routes(
+    state: AppState,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     let health = warp::path!("health")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -213,7 +217,9 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
     let agents = warp::path!("api" / "mesh" / "agents")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|s| s.adapter.mesh.agent_summaries())));
+        .map(|state: AppState| {
+            warp::reply::json(&state.with(|s| s.adapter.mesh.agent_summaries()))
+        });
 
     let get_config = warp::path!("api" / "mesh" / "config")
         .and(warp::get())
@@ -232,22 +238,24 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(warp::put().or(warp::post()).unify())
         .and(warp::body::json())
         .and(with_state(state.clone()))
-        .map(|coefficients: MeshCoefficients, state: AppState| -> Box<dyn warp::Reply> {
-            match coefficients.validate() {
-                Ok(()) => {
-                    let view = state.with(|session| {
-                        session.adapter.mesh.coefficients = coefficients;
-                        let mode = session.execution_mode;
-                        session.adapter.mesh.config_view(mode)
-                    });
-                    Box::new(warp::reply::json(&view))
+        .map(
+            |coefficients: MeshCoefficients, state: AppState| -> Box<dyn warp::Reply> {
+                match coefficients.validate() {
+                    Ok(()) => {
+                        let view = state.with(|session| {
+                            session.adapter.mesh.coefficients = coefficients;
+                            let mode = session.execution_mode;
+                            session.adapter.mesh.config_view(mode)
+                        });
+                        Box::new(warp::reply::json(&view))
+                    }
+                    Err(error) => Box::new(warp::reply::with_status(
+                        warp::reply::json(&json!({ "error": error.to_string() })),
+                        StatusCode::BAD_REQUEST,
+                    )),
                 }
-                Err(error) => Box::new(warp::reply::with_status(
-                    warp::reply::json(&json!({ "error": error.to_string() })),
-                    StatusCode::BAD_REQUEST,
-                )),
-            }
-        });
+            },
+        );
 
     let logs = warp::path!("api" / "mesh" / "logs")
         .and(warp::get())
@@ -312,7 +320,9 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
             match found {
                 Some(trace) => Box::new(warp::reply::json(&trace)),
                 None => Box::new(warp::reply::with_status(
-                    warp::reply::json(&json!({ "error": format!("no trace for task `{task_id}`") })),
+                    warp::reply::json(
+                        &json!({ "error": format!("no trace for task `{task_id}`") }),
+                    ),
                     StatusCode::NOT_FOUND,
                 )),
             }
@@ -325,9 +335,13 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(with_state(state.clone()))
         .map(|request: ApiRequest, state: AppState| {
             let response = state.with(|session| {
-                let bridge = HatcherRequest::new(&request.agent_id, AgentRole::Explorer, session.execution_mode)
-                    .with_prompt(&request.prompt)
-                    .with_features(request.features.clone());
+                let bridge = HatcherRequest::new(
+                    &request.agent_id,
+                    AgentRole::Explorer,
+                    session.execution_mode,
+                )
+                .with_prompt(&request.prompt)
+                .with_features(request.features.clone());
                 let hatcher = session.adapter.mesh.evaluate(&bridge);
                 ApiResponse {
                     accepted: hatcher.accepted,
@@ -346,10 +360,15 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(with_state(state.clone()))
         .map(|request: ApiRequest, state: AppState| {
             let value = state.with(|session| {
-                let bridge = HatcherRequest::new(&request.agent_id, AgentRole::Explorer, session.execution_mode)
-                    .with_prompt(&request.prompt)
-                    .with_features(request.features.clone());
-                serde_json::to_value(session.adapter.mesh.rehearse(&bridge, 5)).unwrap_or(serde_json::Value::Null)
+                let bridge = HatcherRequest::new(
+                    &request.agent_id,
+                    AgentRole::Explorer,
+                    session.execution_mode,
+                )
+                .with_prompt(&request.prompt)
+                .with_features(request.features.clone());
+                serde_json::to_value(session.adapter.mesh.rehearse(&bridge, 5))
+                    .unwrap_or(serde_json::Value::Null)
             });
             warp::reply::json(&value)
         });
@@ -412,7 +431,9 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
     let list_runs = warp::path!("api" / "runs")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .map(|state: AppState| warp::reply::json(&state.with(|session| session.adapter.open_runs())));
+        .map(|state: AppState| {
+            warp::reply::json(&state.with(|session| session.adapter.open_runs()))
+        });
 
     let run_status = warp::path!("api" / "runs" / String)
         .and(warp::get())
@@ -425,7 +446,12 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(warp::delete())
         .and(with_state(state.clone()))
         .map(|run_id: String, state: AppState| {
-            contract_result(state.with(|session| session.adapter.cancel(&run_id).map(|()| json!({ "cancelled": run_id }))))
+            contract_result(state.with(|session| {
+                session
+                    .adapter
+                    .cancel(&run_id)
+                    .map(|()| json!({ "cancelled": run_id }))
+            }))
         });
 
     // A list rather than a single report, because a runtime that finishes a whole task
@@ -434,9 +460,11 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
         .and(warp::post())
         .and(warp::body::json())
         .and(with_state(state.clone()))
-        .map(|run_id: String, reports: Vec<StageOutcomeReport>, state: AppState| {
-            contract_result(state.with(|session| session.adapter.report_many(&run_id, reports)))
-        });
+        .map(
+            |run_id: String, reports: Vec<StageOutcomeReport>, state: AppState| {
+                contract_result(state.with(|session| session.adapter.report_many(&run_id, reports)))
+            },
+        );
 
     let finalize_run = warp::path!("api" / "runs" / String / "finalize")
         .and(warp::post())
@@ -463,8 +491,12 @@ fn routes(state: AppState) -> impl Filter<Extract = impl warp::Reply, Error = wa
             // Replayed against a copy of the cohort, never the live mesh: a replay is a
             // measurement, and one that moved the mesh it was measuring would be worth
             // nothing the second time it was run.
-            let (cohort, calibration) =
-                state.with(|session| (session.adapter.mesh.nodes.clone(), session.adapter.calibration));
+            let (cohort, calibration) = state.with(|session| {
+                (
+                    session.adapter.mesh.nodes.clone(),
+                    session.adapter.calibration,
+                )
+            });
             warp::reply::json(&replay.evaluate(cohort, calibration))
         });
 
@@ -684,7 +716,13 @@ fn command_run(state: &AppState) {
         result.trace
     });
 
-    println!("task {} | {} | P={:.3} ({})", trace.task_id, trace.domain, trace.priority.value, trace.priority.band.as_str());
+    println!(
+        "task {} | {} | P={:.3} ({})",
+        trace.task_id,
+        trace.domain,
+        trace.priority.value,
+        trace.priority.band.as_str()
+    );
     for record in &trace.stages {
         println!(
             "  {:<14} {:<14} {:<4} conf={:.2}  {}",
@@ -697,7 +735,11 @@ fn command_run(state: &AppState) {
     }
     println!(
         "decision: {} (confidence {:.2}) | verified={} | omega {:.4} -> {:.4}",
-        trace.decision.action, trace.decision.confidence, trace.verified, trace.omega_before, trace.omega_after
+        trace.decision.action,
+        trace.decision.confidence,
+        trace.verified,
+        trace.omega_before,
+        trace.omega_after
     );
     println!("digest: {}", trace.digest);
 }
@@ -710,7 +752,8 @@ fn command_scenario(state: &AppState, name: &str) {
     };
 
     let report = state.with(|session| {
-        let (report, traces) = hatcher_playground::run_scenario(&mut session.adapter.mesh, &scenario);
+        let (report, traces) =
+            hatcher_playground::run_scenario(&mut session.adapter.mesh, &scenario);
         for trace in traces {
             session.log(trace);
         }
@@ -758,7 +801,10 @@ fn command_overview(state: &AppState) {
 
 fn command_trust(state: &AppState) {
     let (view, collaborations) = state.with(|session| {
-        (session.adapter.mesh.trust_view(), session.adapter.mesh.top_collaborations(5))
+        (
+            session.adapter.mesh.trust_view(),
+            session.adapter.mesh.top_collaborations(5),
+        )
     });
 
     print!("{:<14}", "T_ij");
@@ -792,8 +838,19 @@ fn command_omega(state: &AppState) {
         analytics.total_tasks,
         analytics.success_rate * 100.0
     );
-    println!("{:>6} {:>8} {:>7} {:>7} {:>7} {:>7} {:>7}", "epoch", "omega", "L", "E", "C", "F", "D");
-    for sample in analytics.series.iter().rev().take(15).collect::<Vec<_>>().into_iter().rev() {
+    println!(
+        "{:>6} {:>8} {:>7} {:>7} {:>7} {:>7} {:>7}",
+        "epoch", "omega", "L", "E", "C", "F", "D"
+    );
+    for sample in analytics
+        .series
+        .iter()
+        .rev()
+        .take(15)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
         println!(
             "{:>6} {:>8.4} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
             sample.epoch,
@@ -822,7 +879,10 @@ fn command_logs(state: &AppState) {
         println!("no traces yet; try `run` or `scenario`");
         return;
     }
-    println!("{:<18} {:<10} {:<10} {:<9} {:>7} {:>8}", "task", "action", "band", "verified", "P", "omega");
+    println!(
+        "{:<18} {:<10} {:<10} {:<9} {:>7} {:>8}",
+        "task", "action", "band", "verified", "P", "omega"
+    );
     for row in rows {
         println!(
             "{:<18} {:<10} {:<10} {:<9} {:>7.3} {:>8.4}",
@@ -890,7 +950,10 @@ fn command_contract(state: &AppState) {
         );
     }
     if !plan.constraint_violations.is_empty() {
-        println!("  ! could not satisfy constraints at: {}", plan.constraint_violations.join(", "));
+        println!(
+            "  ! could not satisfy constraints at: {}",
+            plan.constraint_violations.join(", ")
+        );
     }
 
     // Stand in for a real runtime: report every stage as a solid success.
@@ -905,7 +968,11 @@ fn command_contract(state: &AppState) {
         .collect();
 
     match state.with(|session| session.adapter.report_many(&plan.run_id, reports)) {
-        Ok(status) => println!("report   {} of 5 stages in, complete={}", status.reported.len(), status.complete),
+        Ok(status) => println!(
+            "report   {} of 5 stages in, complete={}",
+            status.reported.len(),
+            status.complete
+        ),
         Err(error) => return println!("report rejected: {error}"),
     }
 
@@ -958,8 +1025,12 @@ fn command_benchmark(state: &AppState, argument: &str) {
 /// Replay a synthetic recording and score the mesh's routing against it.
 fn command_replay(state: &AppState) {
     let replay = hatcher_playground::synthetic_recording(40, "expert");
-    let (cohort, calibration) =
-        state.with(|session| (session.adapter.mesh.nodes.clone(), session.adapter.calibration));
+    let (cohort, calibration) = state.with(|session| {
+        (
+            session.adapter.mesh.nodes.clone(),
+            session.adapter.calibration,
+        )
+    });
     let report = replay.evaluate(cohort, calibration);
 
     println!("{}", report.headline());
@@ -974,7 +1045,11 @@ fn command_replay(state: &AppState) {
     }
     println!(
         "  router added value: {}",
-        if report.router_added_value() { "yes" } else { "not demonstrated" }
+        if report.router_added_value() {
+            "yes"
+        } else {
+            "not demonstrated"
+        }
     );
 }
 
@@ -1061,12 +1136,17 @@ fn main() {
         }
         Some("battle") => {
             let report = AgentBattle::new().run();
-            println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).unwrap_or_default()
+            );
         }
         Some("--help") | Some("-h") => {
             println!("usage: hatcher-ux [serve | scenario <name> | battle]");
             println!("  no arguments starts the interactive console");
-            println!("  HATCHER_MESH_PORT           listen port for `serve` (default {DEFAULT_PORT})");
+            println!(
+                "  HATCHER_MESH_PORT           listen port for `serve` (default {DEFAULT_PORT})"
+            );
             println!("  HATCHER_MESH_ALLOWED_ORIGIN CORS origin (default: any)");
         }
         _ => interactive_cli(state),
@@ -1108,7 +1188,10 @@ mod tests {
 
         assert_eq!(state.with(|session| session.adapter.mesh.global.epoch), 2);
         assert_eq!(state.with(|session| session.traces.len()), 2);
-        assert_ne!(first.omega, second.omega, "telemetry must reflect real work");
+        assert_ne!(
+            first.omega, second.omega,
+            "telemetry must reflect real work"
+        );
     }
 
     #[test]
@@ -1166,7 +1249,11 @@ mod tests {
         std::env::set_var("HATCHER_MESH_PORT", "4100");
         assert_eq!(mesh_port(), 4100);
         std::env::set_var("HATCHER_MESH_PORT", "not-a-port");
-        assert_eq!(mesh_port(), DEFAULT_PORT, "garbage falls back instead of panicking");
+        assert_eq!(
+            mesh_port(),
+            DEFAULT_PORT,
+            "garbage falls back instead of panicking"
+        );
         std::env::remove_var("HATCHER_MESH_PORT");
     }
 }

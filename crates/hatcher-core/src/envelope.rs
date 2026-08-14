@@ -82,7 +82,10 @@ mod tests {
 
     #[test]
     fn envelope_digest_is_stable_and_verifiable() {
-        let sample = Sample { b: 7, a: "x".into() };
+        let sample = Sample {
+            b: 7,
+            a: "x".into(),
+        };
         let sealed = Envelope::seal(sample.clone()).unwrap();
         assert_eq!(sealed.codec, CANONICAL_CODEC);
         assert_eq!(sealed.schema_version, SCHEMA_VERSION);
@@ -97,8 +100,16 @@ mod tests {
             a: String,
             b: u32,
         }
-        let left = canonical_digest(&Sample { b: 1, a: "y".into() }).unwrap();
-        let right = canonical_digest(&Flipped { a: "y".into(), b: 1 }).unwrap();
+        let left = canonical_digest(&Sample {
+            b: 1,
+            a: "y".into(),
+        })
+        .unwrap();
+        let right = canonical_digest(&Flipped {
+            a: "y".into(),
+            b: 1,
+        })
+        .unwrap();
         assert_eq!(left, right, "canonical JSON must sort keys");
     }
 

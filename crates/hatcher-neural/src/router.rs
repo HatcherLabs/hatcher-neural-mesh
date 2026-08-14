@@ -7,7 +7,9 @@
 //! equation is supposed to produce: urgent work goes to the strongest agent, deferred
 //! work goes to the cheapest one that can still do it.
 
-use hatcher_core::{AgentNode, Assignment, PipelineStage, PriorityBand, RuntimeCalibration, TaskSpec};
+use hatcher_core::{
+    AgentNode, Assignment, PipelineStage, PriorityBand, RuntimeCalibration, TaskSpec,
+};
 
 use crate::mesh::NeuralMesh;
 
@@ -41,14 +43,21 @@ fn cost_exponent(band: PriorityBand) -> f64 {
 /// geometric mean puts capability back on the same scale as the other three terms,
 /// which is also the scale [`crate::pipeline`] uses to resolve whether a stage
 /// succeeds — so routing and execution agree about what "capable" means.
-pub fn score_candidate(mesh: &NeuralMesh, node: &AgentNode, task: &TaskSpec, band: PriorityBand) -> f64 {
+pub fn score_candidate(
+    mesh: &NeuralMesh,
+    node: &AgentNode,
+    task: &TaskSpec,
+    band: PriorityBand,
+) -> f64 {
     let capability = node.influence().max(0.0).powf(0.2);
     let trust = TRUST_FLOOR + mesh.trust.inbound_trust(&node.id);
     let mastery = MASTERY_FLOOR + node.mastery(&task.domain);
     // Normalize the resource ratio into a comparable multiplier. Efficiency is
     // unbounded above (cheap, fast agents can score arbitrarily high), so squash it.
     let efficiency = node.resource_efficiency();
-    let cost_term = (efficiency / (1.0 + efficiency)).max(1e-6).powf(cost_exponent(band));
+    let cost_term = (efficiency / (1.0 + efficiency))
+        .max(1e-6)
+        .powf(cost_exponent(band));
 
     capability * trust * mastery * cost_term
 }
@@ -60,7 +69,8 @@ pub fn score_candidate(mesh: &NeuralMesh, node: &AgentNode, task: &TaskSpec, ban
 /// reports land, the absolutes are used directly and the projection stops mattering.
 pub fn expected_profile(node: &AgentNode, calibration: &RuntimeCalibration) -> (f64, f64) {
     (
-        node.resources.expected_latency_ms(calibration.latency_ceiling_ms),
+        node.resources
+            .expected_latency_ms(calibration.latency_ceiling_ms),
         node.resources.expected_cost(calibration.cost_ceiling),
     )
 }
@@ -89,7 +99,14 @@ pub fn rank(
     band: PriorityBand,
     exclude: &[String],
 ) -> Vec<Assignment> {
-    rank_with(mesh, stage, task, band, exclude, &RuntimeCalibration::default())
+    rank_with(
+        mesh,
+        stage,
+        task,
+        band,
+        exclude,
+        &RuntimeCalibration::default(),
+    )
 }
 
 /// Rank candidates against an explicit calibration.
@@ -118,21 +135,33 @@ pub fn rank_with(
         .copied()
         .filter(|node| !exclude.contains(&node.id))
         .collect();
-    let available = if available.is_empty() { pool } else { available };
+    let available = if available.is_empty() {
+        pool
+    } else {
+        available
+    };
 
     let healthy: Vec<&AgentNode> = available
         .iter()
         .copied()
         .filter(|node| !isolated.contains(&node.id))
         .collect();
-    let candidates = if healthy.is_empty() { available } else { healthy };
+    let candidates = if healthy.is_empty() {
+        available
+    } else {
+        healthy
+    };
 
     let affordable: Vec<&AgentNode> = candidates
         .iter()
         .copied()
         .filter(|node| admits(node, task, calibration))
         .collect();
-    let candidates = if affordable.is_empty() { candidates } else { affordable };
+    let candidates = if affordable.is_empty() {
+        candidates
+    } else {
+        affordable
+    };
 
     let mut assignments: Vec<Assignment> = candidates
         .into_iter()
@@ -195,7 +224,14 @@ mod tests {
     #[test]
     fn stages_route_to_their_role() {
         let mesh = NeuralMesh::default();
-        let assignment = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]).unwrap();
+        let assignment = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
         assert_eq!(assignment.role, AgentRole::Coder);
         assert_eq!(assignment.agent_id, "coder-01");
         assert_eq!(assignment.stage, PipelineStage::Code);
@@ -213,7 +249,14 @@ mod tests {
         ]);
         mesh.sync_link_latencies();
 
-        let winner = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]).unwrap();
+        let winner = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
         assert_eq!(winner.agent_id, "rustacean");
     }
 
@@ -230,11 +273,28 @@ mod tests {
                 .with_expertise("rust", 0.7),
         ]);
 
-        let deferred = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Deferred, &[]).unwrap();
+        let deferred = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Deferred,
+            &[],
+        )
+        .unwrap();
         assert_eq!(deferred.agent_id, "cheap", "deferred work is cost-driven");
 
-        let urgent = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Immediate, &[]).unwrap();
-        assert_eq!(urgent.agent_id, "strong", "urgent work is capability-driven");
+        let urgent = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Immediate,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            urgent.agent_id, "strong",
+            "urgent work is capability-driven"
+        );
     }
 
     #[test]
@@ -256,15 +316,24 @@ mod tests {
             mesh.trust.settle(&coefficients, 1.0);
         }
 
-        let winner = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]).unwrap();
+        let winner = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
         assert_eq!(winner.agent_id, "b");
     }
 
     #[test]
     fn isolated_agents_are_skipped_while_alternatives_exist() {
         let mut mesh = NeuralMesh::with_cohort(vec![
-            AgentNode::new("burned", "burned", AgentRole::Coder).with_capability(CapabilityVector::uniform(0.9)),
-            AgentNode::new("steady", "steady", AgentRole::Coder).with_capability(CapabilityVector::uniform(0.5)),
+            AgentNode::new("burned", "burned", AgentRole::Coder)
+                .with_capability(CapabilityVector::uniform(0.9)),
+            AgentNode::new("steady", "steady", AgentRole::Coder)
+                .with_capability(CapabilityVector::uniform(0.5)),
             AgentNode::new("judge", "judge", AgentRole::Critic),
         ]);
 
@@ -276,38 +345,87 @@ mod tests {
         }
         assert!(mesh.trust.isolated().contains(&"burned".to_string()));
 
-        let winner = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]).unwrap();
-        assert_eq!(winner.agent_id, "steady", "the mesh routes around an isolated agent");
+        let winner = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            winner.agent_id, "steady",
+            "the mesh routes around an isolated agent"
+        );
     }
 
     #[test]
     fn a_missing_role_falls_back_to_the_whole_cohort() {
-        let mesh = NeuralMesh::with_cohort(vec![AgentNode::new("solo", "solo", AgentRole::Executor)]);
-        let assignment = select(&mesh, PipelineStage::Verify, &task(), PriorityBand::Standard, &[]).unwrap();
-        assert_eq!(assignment.agent_id, "solo", "a mesh with no verifier still verifies");
+        let mesh =
+            NeuralMesh::with_cohort(vec![AgentNode::new("solo", "solo", AgentRole::Executor)]);
+        let assignment = select(
+            &mesh,
+            PipelineStage::Verify,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            assignment.agent_id, "solo",
+            "a mesh with no verifier still verifies"
+        );
     }
 
     #[test]
     fn exclusion_prevents_one_agent_holding_two_stages() {
         let mesh = NeuralMesh::with_cohort(vec![
-            AgentNode::new("coder-01", "first", AgentRole::Coder).with_capability(CapabilityVector::uniform(0.8)),
-            AgentNode::new("coder-02", "second", AgentRole::Coder).with_capability(CapabilityVector::uniform(0.6)),
+            AgentNode::new("coder-01", "first", AgentRole::Coder)
+                .with_capability(CapabilityVector::uniform(0.8)),
+            AgentNode::new("coder-02", "second", AgentRole::Coder)
+                .with_capability(CapabilityVector::uniform(0.6)),
         ]);
 
-        let unrestricted = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]).unwrap();
+        let unrestricted = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
         assert_eq!(unrestricted.agent_id, "coder-01");
 
         let excluded = vec!["coder-01".to_string()];
-        let assignment = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &excluded).unwrap();
-        assert_eq!(assignment.agent_id, "coder-02", "an excluded agent yields to its peer");
+        let assignment = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &excluded,
+        )
+        .unwrap();
+        assert_eq!(
+            assignment.agent_id, "coder-02",
+            "an excluded agent yields to its peer"
+        );
     }
 
     #[test]
     fn exclusion_yields_rather_than_stalling_the_pipeline() {
         let mesh = NeuralMesh::with_cohort(vec![AgentNode::new("only", "only", AgentRole::Coder)]);
-        let assignment =
-            select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &["only".to_string()]).unwrap();
-        assert_eq!(assignment.agent_id, "only", "a stage must be staffed even if it doubles up");
+        let assignment = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &["only".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            assignment.agent_id, "only",
+            "a stage must be staffed even if it doubles up"
+        );
     }
 
     #[test]
@@ -323,19 +441,45 @@ mod tests {
 
         let mesh = NeuralMesh::with_cohort(vec![fast, slow]);
 
-        let unconstrained = select(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]).unwrap();
-        assert_eq!(unconstrained.agent_id, "slow", "left alone, the mesh takes the strong agent");
+        let unconstrained = select(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            unconstrained.agent_id, "slow",
+            "left alone, the mesh takes the strong agent"
+        );
 
         let urgent = task().with_constraints(TaskConstraints::latency(5_000.0));
-        let constrained = select(&mesh, PipelineStage::Code, &urgent, PriorityBand::Standard, &[]).unwrap();
-        assert_eq!(constrained.agent_id, "fast", "a deadline excludes the agent that cannot meet it");
+        let constrained = select(
+            &mesh,
+            PipelineStage::Code,
+            &urgent,
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            constrained.agent_id, "fast",
+            "a deadline excludes the agent that cannot meet it"
+        );
     }
 
     #[test]
     fn an_impossible_limit_still_routes_rather_than_stalling() {
         let mesh = NeuralMesh::default();
         let impossible = task().with_constraints(TaskConstraints::latency(1.0));
-        let assignment = select(&mesh, PipelineStage::Code, &impossible, PriorityBand::Standard, &[]);
+        let assignment = select(
+            &mesh,
+            PipelineStage::Code,
+            &impossible,
+            PriorityBand::Standard,
+            &[],
+        );
         assert!(
             assignment.is_some(),
             "refusing to route is worse than routing over budget; the plan reports the violation"
@@ -355,7 +499,14 @@ mod tests {
 
         let mesh = NeuralMesh::with_cohort(vec![cheap, pricey]);
         let budgeted = task().with_constraints(TaskConstraints::cost(0.10));
-        let assignment = select(&mesh, PipelineStage::Code, &budgeted, PriorityBand::Standard, &[]).unwrap();
+        let assignment = select(
+            &mesh,
+            PipelineStage::Code,
+            &budgeted,
+            PriorityBand::Standard,
+            &[],
+        )
+        .unwrap();
         assert_eq!(assignment.agent_id, "cheap");
     }
 
@@ -368,17 +519,35 @@ mod tests {
 
         assert_eq!(latency_ms, 30_000.0, "half of a 60s ceiling");
         assert_eq!(cost, 0.5);
-        assert!(!admits(&node, &task().with_constraints(TaskConstraints::latency(10_000.0)), &calibration));
+        assert!(!admits(
+            &node,
+            &task().with_constraints(TaskConstraints::latency(10_000.0)),
+            &calibration
+        ));
     }
 
     #[test]
     fn ranking_is_reproducible_for_identical_candidates() {
         let mesh = NeuralMesh::with_cohort(vec![
-            AgentNode::new("b-agent", "b", AgentRole::Coder).with_capability(CapabilityVector::uniform(0.6)),
-            AgentNode::new("a-agent", "a", AgentRole::Coder).with_capability(CapabilityVector::uniform(0.6)),
+            AgentNode::new("b-agent", "b", AgentRole::Coder)
+                .with_capability(CapabilityVector::uniform(0.6)),
+            AgentNode::new("a-agent", "a", AgentRole::Coder)
+                .with_capability(CapabilityVector::uniform(0.6)),
         ]);
-        let first = rank(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]);
-        let second = rank(&mesh, PipelineStage::Code, &task(), PriorityBand::Standard, &[]);
+        let first = rank(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        );
+        let second = rank(
+            &mesh,
+            PipelineStage::Code,
+            &task(),
+            PriorityBand::Standard,
+            &[],
+        );
         assert_eq!(first, second);
         assert_eq!(first[0].agent_id, "a-agent", "ties break on id");
     }

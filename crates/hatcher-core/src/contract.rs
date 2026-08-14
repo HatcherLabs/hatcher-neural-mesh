@@ -132,7 +132,9 @@ impl ErrorClass {
     /// being throttled is a property of the account, not the reasoning.
     pub fn attribution(&self) -> Attribution {
         match self {
-            ErrorClass::None | ErrorClass::Quality | ErrorClass::Refusal | ErrorClass::Schema => Attribution::Agent,
+            ErrorClass::None | ErrorClass::Quality | ErrorClass::Refusal | ErrorClass::Schema => {
+                Attribution::Agent
+            }
             ErrorClass::Timeout | ErrorClass::Tool | ErrorClass::Unknown => Attribution::Agent,
             ErrorClass::RateLimit | ErrorClass::Infrastructure => Attribution::Environment,
             ErrorClass::Cancelled => Attribution::Caller,
@@ -515,7 +517,10 @@ impl TaskEnvelope {
             return Err(ContractError::invalid("description", "must not be empty"));
         }
         if self.features.iter().any(|value| !value.is_finite()) {
-            return Err(ContractError::invalid("features", "must all be finite numbers"));
+            return Err(ContractError::invalid(
+                "features",
+                "must all be finite numbers",
+            ));
         }
         for (name, value) in [
             ("urgency", self.urgency),
@@ -628,9 +633,11 @@ impl RoutingPlan {
             .iter()
             .find(|planned| planned.stage == PipelineStage::Code)
             .or_else(|| {
-                self.stages
-                    .iter()
-                    .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+                self.stages.iter().max_by(|a, b| {
+                    a.score
+                        .partial_cmp(&b.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
             })
             .map(|planned| planned.agent_id.as_str())
     }
@@ -746,10 +753,16 @@ impl StageOutcomeReport {
         unit_range("quality", self.quality)?;
         unit_range("confidence", self.confidence)?;
         if !self.latency_ms.is_finite() || self.latency_ms < 0.0 {
-            return Err(ContractError::invalid("latency_ms", "must be finite and non-negative"));
+            return Err(ContractError::invalid(
+                "latency_ms",
+                "must be finite and non-negative",
+            ));
         }
         if !self.cost.is_finite() || self.cost < 0.0 {
-            return Err(ContractError::invalid("cost", "must be finite and non-negative"));
+            return Err(ContractError::invalid(
+                "cost",
+                "must be finite and non-negative",
+            ));
         }
         if self.success && self.error != ErrorClass::None {
             return Err(ContractError::invalid(
@@ -897,10 +910,16 @@ impl RuntimeCalibration {
 
     pub fn validate(&self) -> Result<(), ContractError> {
         if !(self.latency_ceiling_ms.is_finite() && self.latency_ceiling_ms > 0.0) {
-            return Err(ContractError::invalid("latency_ceiling_ms", "must be finite and positive"));
+            return Err(ContractError::invalid(
+                "latency_ceiling_ms",
+                "must be finite and positive",
+            ));
         }
         if !(self.cost_ceiling.is_finite() && self.cost_ceiling > 0.0) {
-            return Err(ContractError::invalid("cost_ceiling", "must be finite and positive"));
+            return Err(ContractError::invalid(
+                "cost_ceiling",
+                "must be finite and positive",
+            ));
         }
         unit_range("observation_rate", self.observation_rate)
     }
@@ -953,17 +972,26 @@ impl ContractError {
 impl std::fmt::Display for ContractError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContractError::Invalid { field, reason } => write!(formatter, "invalid `{field}`: {reason}"),
+            ContractError::Invalid { field, reason } => {
+                write!(formatter, "invalid `{field}`: {reason}")
+            }
             ContractError::UnknownRun { run_id } => write!(formatter, "no open run `{run_id}`"),
             ContractError::UnknownAgent { agent_id } => write!(formatter, "no agent `{agent_id}`"),
             ContractError::Mismatch { expected, found } => {
                 write!(formatter, "expected {expected}, found {found}")
             }
             ContractError::DuplicateReport { stage } => {
-                write!(formatter, "stage `{stage}` was already reported for this run")
+                write!(
+                    formatter,
+                    "stage `{stage}` was already reported for this run"
+                )
             }
             ContractError::Incomplete { missing } => {
-                write!(formatter, "cannot finalize, missing outcomes for: {}", missing.join(", "))
+                write!(
+                    formatter,
+                    "cannot finalize, missing outcomes for: {}",
+                    missing.join(", ")
+                )
             }
         }
     }
@@ -977,13 +1005,19 @@ mod tests {
 
     #[test]
     fn an_outage_is_not_evidence_that_an_agent_is_weak() {
-        assert_eq!(ErrorClass::Infrastructure.attribution(), Attribution::Environment);
+        assert_eq!(
+            ErrorClass::Infrastructure.attribution(),
+            Attribution::Environment
+        );
         assert!(ErrorClass::Infrastructure.blame_weight() < ErrorClass::Quality.blame_weight());
         assert!(
             !ErrorClass::Infrastructure.is_trust_evidence(),
             "an outage must never reach the trust ledger"
         );
-        assert!(ErrorClass::Infrastructure.is_countable(), "but the run still happened");
+        assert!(
+            ErrorClass::Infrastructure.is_countable(),
+            "but the run still happened"
+        );
     }
 
     #[test]
@@ -996,7 +1030,10 @@ mod tests {
     #[test]
     fn slowness_is_the_agents_problem_but_throttling_is_not() {
         assert_eq!(ErrorClass::Timeout.attribution(), Attribution::Agent);
-        assert_eq!(ErrorClass::RateLimit.attribution(), Attribution::Environment);
+        assert_eq!(
+            ErrorClass::RateLimit.attribution(),
+            Attribution::Environment
+        );
     }
 
     #[test]
@@ -1023,26 +1060,34 @@ mod tests {
 
     #[test]
     fn registration_rejects_an_empty_id() {
-        assert!(AgentRegistration::new("  ", "A", AgentRole::Coder).validate().is_err());
+        assert!(AgentRegistration::new("  ", "A", AgentRole::Coder)
+            .validate()
+            .is_err());
     }
 
     #[test]
     fn a_report_cannot_claim_success_and_an_error_at_once() {
         let mut report = StageOutcomeReport::success(PipelineStage::Code, "coder-01", 0.9);
         report.error = ErrorClass::Timeout;
-        assert!(report.validate().is_err(), "a contradiction must not enter a digest");
+        assert!(
+            report.validate().is_err(),
+            "a contradiction must not enter a digest"
+        );
 
-        let mut silent_failure = StageOutcomeReport::failure(PipelineStage::Code, "coder-01", ErrorClass::Quality);
+        let mut silent_failure =
+            StageOutcomeReport::failure(PipelineStage::Code, "coder-01", ErrorClass::Quality);
         silent_failure.error = ErrorClass::None;
         assert!(silent_failure.validate().is_err(), "a failure must say why");
     }
 
     #[test]
     fn a_report_rejects_negative_latency_and_cost() {
-        let report = StageOutcomeReport::success(PipelineStage::Code, "coder-01", 0.9).with_latency_ms(-1.0);
+        let report =
+            StageOutcomeReport::success(PipelineStage::Code, "coder-01", 0.9).with_latency_ms(-1.0);
         assert!(report.validate().is_err());
 
-        let report = StageOutcomeReport::success(PipelineStage::Code, "coder-01", 0.9).with_cost(-0.5);
+        let report =
+            StageOutcomeReport::success(PipelineStage::Code, "coder-01", 0.9).with_cost(-0.5);
         assert!(report.validate().is_err());
     }
 
@@ -1057,11 +1102,18 @@ mod tests {
         assert_eq!(derived.id, "task-000007");
         assert_eq!(derived.domain, "rust");
         assert_eq!(derived.urgency, 0.9);
-        assert!(derived.uncertainty > 0.3, "dispersed features mean an ambiguous request");
+        assert!(
+            derived.uncertainty > 0.3,
+            "dispersed features mean an ambiguous request"
+        );
 
         let mut pinned = envelope.clone();
         pinned.uncertainty = Some(0.05);
-        assert_eq!(pinned.to_task(7).uncertainty, 0.05, "an explicit override wins");
+        assert_eq!(
+            pinned.to_task(7).uncertainty,
+            0.05,
+            "an explicit override wins"
+        );
     }
 
     #[test]
@@ -1084,7 +1136,11 @@ mod tests {
         assert_eq!(calibration.normalize_latency(15_000.0), 0.5);
         assert_eq!(calibration.denormalize_latency(0.5), 15_000.0);
         assert_eq!(calibration.normalize_cost(1.0), 0.5);
-        assert_eq!(calibration.normalize_latency(1e9), 1.0, "the ceiling is a ceiling");
+        assert_eq!(
+            calibration.normalize_latency(1e9),
+            1.0,
+            "the ceiling is a ceiling"
+        );
         assert!(calibration.validate().is_ok());
         assert!(RuntimeCalibration::new(0.0, 1.0).validate().is_err());
     }
@@ -1109,9 +1165,9 @@ mod tests {
         let here = clean
             .clone()
             .with_degraded(Some("onnx model not found at `/home/a/policy.onnx`".into()));
-        let there = clean
-            .clone()
-            .with_degraded(Some("onnx model not found at `D:\\models\\policy.onnx`".into()));
+        let there = clean.clone().with_degraded(Some(
+            "onnx model not found at `D:\\models\\policy.onnx`".into(),
+        ));
 
         assert_eq!(
             here.commitment(),
@@ -1140,8 +1196,19 @@ mod tests {
     #[test]
     fn contract_errors_map_onto_distinct_http_statuses() {
         assert_eq!(ContractError::invalid("x", "y").status(), 400);
-        assert_eq!(ContractError::UnknownRun { run_id: "r".into() }.status(), 404);
-        assert_eq!(ContractError::DuplicateReport { stage: "code".into() }.status(), 409);
-        assert!(ContractError::invalid("x", "y").to_string().contains("invalid `x`"));
+        assert_eq!(
+            ContractError::UnknownRun { run_id: "r".into() }.status(),
+            404
+        );
+        assert_eq!(
+            ContractError::DuplicateReport {
+                stage: "code".into()
+            }
+            .status(),
+            409
+        );
+        assert!(ContractError::invalid("x", "y")
+            .to_string()
+            .contains("invalid `x`"));
     }
 }

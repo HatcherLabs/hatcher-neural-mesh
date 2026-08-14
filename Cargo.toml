@@ -14,10 +14,10 @@ resolver = "2"
 [workspace.package]
 version = "1.0.0"
 edition = "2021"
-authors = ["HatcherLabs"]
+authors = ["Meta-Oracle", "HatcherLabs"]
 license = "MIT"
-repository = "https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh"
-homepage = "https://github.com/Meta-Oracle/hatcher-agentic-neural-mesh"
+repository = "https://github.com/HatcherLabs/hatcher-neural-mesh"
+homepage = "https://github.com/HatcherLabs/hatcher-neural-mesh"
 # Inherited readme paths resolve from the workspace root, not the member directory.
 readme = "README.md"
 # Verified by compiling each crate against this toolchain, not estimated.

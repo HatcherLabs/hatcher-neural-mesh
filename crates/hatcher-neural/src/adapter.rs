@@ -33,9 +33,10 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use hatcher_core::{
-    AgentNode, AgentRegistration, AgentSummary, Assignment, ContractError, DecisionHead, MeshReceipt,
-    OutcomeProvenance, PipelineStage, PipelineTrace, PlannedStage, RegistrationAck, RoutingPlan,
-    RuntimeCalibration, StageOutcomeReport, StageReceipt, TaskEnvelope, TaskSpec, CONTRACT_VERSION,
+    AgentNode, AgentRegistration, AgentSummary, Assignment, ContractError, DecisionHead,
+    MeshReceipt, OutcomeProvenance, PipelineStage, PipelineTrace, PlannedStage, RegistrationAck,
+    RoutingPlan, RuntimeCalibration, StageOutcomeReport, StageReceipt, TaskEnvelope, TaskSpec,
+    CONTRACT_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -82,7 +83,10 @@ struct OpenRun {
 
 impl OpenRun {
     fn staffed_stages(&self) -> Vec<PipelineStage> {
-        self.assignments.iter().map(|assignment| assignment.stage).collect()
+        self.assignments
+            .iter()
+            .map(|assignment| assignment.stage)
+            .collect()
     }
 
     fn status(&self) -> RunStatus {
@@ -164,7 +168,10 @@ impl MeshAdapter {
     /// Fails loudly rather than degrading. An operator who deliberately swaps the policy
     /// on an adapter that is about to serve production traffic should find out here, not
     /// by noticing later that the receipts say `native`.
-    pub fn try_with_policy(mut self, model_path: impl Into<String>) -> Result<Self, InferenceError> {
+    pub fn try_with_policy(
+        mut self,
+        model_path: impl Into<String>,
+    ) -> Result<Self, InferenceError> {
         self.mesh = self.mesh.try_with_onnx(model_path)?;
         Ok(self)
     }
@@ -179,7 +186,10 @@ impl MeshAdapter {
     /// measured history** — telemetry, observed cost and latency, and everything the
     /// learning equations have moved. A restarting worker re-announcing itself must not
     /// be able to wipe its own track record by declaring a fresh capability vector.
-    pub fn register_agent(&mut self, registration: AgentRegistration) -> Result<RegistrationAck, ContractError> {
+    pub fn register_agent(
+        &mut self,
+        registration: AgentRegistration,
+    ) -> Result<RegistrationAck, ContractError> {
         registration.validate()?;
 
         let created = self.mesh.node(&registration.id).is_none();
@@ -189,7 +199,8 @@ impl MeshAdapter {
                 .with_resources(registration.resources)
                 .with_confidence(registration.confidence);
             for (domain, mastery) in &registration.expertise {
-                node.expertise.insert(domain.clone(), mastery.clamp(0.0, 1.0));
+                node.expertise
+                    .insert(domain.clone(), mastery.clamp(0.0, 1.0));
             }
             self.mesh.add_agent(node);
         } else if let Some(node) = self.mesh.node_mut(&registration.id) {
@@ -261,9 +272,14 @@ impl MeshAdapter {
         let mut violations: Vec<String> = Vec::new();
 
         for stage in STAFFED {
-            let Some(assignment) =
-                router::select_with(&self.mesh, stage, &task, priority.band, &taken, &self.calibration)
-            else {
+            let Some(assignment) = router::select_with(
+                &self.mesh,
+                stage,
+                &task,
+                priority.band,
+                &taken,
+                &self.calibration,
+            ) else {
                 continue;
             };
             taken.push(assignment.agent_id.clone());
@@ -308,7 +324,10 @@ impl MeshAdapter {
             execution_mode: task.execution_mode,
             priority,
             band: priority.band,
-            expected_latency_ms: stages.iter().map(|planned| planned.expected_latency_ms).sum(),
+            expected_latency_ms: stages
+                .iter()
+                .map(|planned| planned.expected_latency_ms)
+                .sum(),
             expected_cost: stages.iter().map(|planned| planned.expected_cost).sum(),
             stages,
             mesh_digest: self.mesh.digest(),
@@ -333,8 +352,12 @@ impl MeshAdapter {
     /// A run id that is stable for a given mesh state and task, so a replayed session
     /// produces the same handles.
     fn mint_run_id(&self, task: &TaskSpec) -> String {
-        let digest = hatcher_core::canonical_digest(&(task.id.as_str(), self.sequence, self.mesh.global.epoch))
-            .unwrap_or_default();
+        let digest = hatcher_core::canonical_digest(&(
+            task.id.as_str(),
+            self.sequence,
+            self.mesh.global.epoch,
+        ))
+        .unwrap_or_default();
         format!("run-{}", &digest[..16.min(digest.len())])
     }
 
@@ -347,12 +370,19 @@ impl MeshAdapter {
     /// The stage must be in the plan and the agent must be the one the plan named.
     /// Crediting an outcome to an agent that did not produce it would teach the mesh the
     /// exact opposite of the truth, so a mismatch is rejected rather than coerced.
-    pub fn report(&mut self, run_id: &str, report: StageOutcomeReport) -> Result<RunStatus, ContractError> {
+    pub fn report(
+        &mut self,
+        run_id: &str,
+        report: StageOutcomeReport,
+    ) -> Result<RunStatus, ContractError> {
         report.validate()?;
 
-        let run = self.open.get_mut(run_id).ok_or_else(|| ContractError::UnknownRun {
-            run_id: run_id.to_string(),
-        })?;
+        let run = self
+            .open
+            .get_mut(run_id)
+            .ok_or_else(|| ContractError::UnknownRun {
+                run_id: run_id.to_string(),
+            })?;
 
         let planned = run
             .assignments
@@ -365,7 +395,11 @@ impl MeshAdapter {
 
         if planned.agent_id != report.agent_id {
             return Err(ContractError::Mismatch {
-                expected: format!("agent `{}` for stage `{}`", planned.agent_id, report.stage.as_str()),
+                expected: format!(
+                    "agent `{}` for stage `{}`",
+                    planned.agent_id,
+                    report.stage.as_str()
+                ),
                 found: format!("agent `{}`", report.agent_id),
             });
         }
@@ -386,9 +420,12 @@ impl MeshAdapter {
         let reports: Vec<StageOutcomeReport> = reports.into_iter().collect();
 
         {
-            let run = self.open.get(run_id).ok_or_else(|| ContractError::UnknownRun {
-                run_id: run_id.to_string(),
-            })?;
+            let run = self
+                .open
+                .get(run_id)
+                .ok_or_else(|| ContractError::UnknownRun {
+                    run_id: run_id.to_string(),
+                })?;
             for report in &reports {
                 report.validate()?;
                 let planned = run
@@ -401,7 +438,11 @@ impl MeshAdapter {
                     })?;
                 if planned.agent_id != report.agent_id {
                     return Err(ContractError::Mismatch {
-                        expected: format!("agent `{}` for stage `{}`", planned.agent_id, report.stage.as_str()),
+                        expected: format!(
+                            "agent `{}` for stage `{}`",
+                            planned.agent_id,
+                            report.stage.as_str()
+                        ),
                         found: format!("agent `{}`", report.agent_id),
                     });
                 }
@@ -473,9 +514,12 @@ impl MeshAdapter {
     }
 
     fn close(&mut self, run_id: &str, simulate_gaps: bool) -> Result<MeshReceipt, ContractError> {
-        let run = self.open.remove(run_id).ok_or_else(|| ContractError::UnknownRun {
-            run_id: run_id.to_string(),
-        })?;
+        let run = self
+            .open
+            .remove(run_id)
+            .ok_or_else(|| ContractError::UnknownRun {
+                run_id: run_id.to_string(),
+            })?;
 
         let source = if simulate_gaps {
             run.reports.clone().simulating_gaps()
@@ -580,7 +624,10 @@ impl MeshAdapter {
 
     /// Look a finalized trace up by task id.
     pub fn trace(&self, task_id: &str) -> Option<&PipelineTrace> {
-        self.history.iter().rev().find(|trace| trace.task_id == task_id)
+        self.history
+            .iter()
+            .rev()
+            .find(|trace| trace.task_id == task_id)
     }
 
     /// How many runs have been finalized, including any dropped from history.
@@ -644,7 +691,12 @@ mod tests {
             .with_features(vec![0.3, 0.7, 0.2, 0.8])
     }
 
-    fn report_plan(plan: &RoutingPlan, quality: f64, latency_ms: f64, cost: f64) -> Vec<StageOutcomeReport> {
+    fn report_plan(
+        plan: &RoutingPlan,
+        quality: f64,
+        latency_ms: f64,
+        cost: f64,
+    ) -> Vec<StageOutcomeReport> {
         plan.stages
             .iter()
             .map(|planned| {
@@ -670,7 +722,10 @@ mod tests {
 
         assert!(ack.created);
         assert_eq!(ack.cohort_size, 1);
-        assert_eq!(ack.bottleneck, "memory", "the caller should see what is capping it");
+        assert_eq!(
+            ack.bottleneck, "memory",
+            "the caller should see what is capping it"
+        );
         assert!(!ack.mesh_digest.is_empty());
         assert_eq!(ack.contract_version, CONTRACT_VERSION);
     }
@@ -679,7 +734,11 @@ mod tests {
     fn a_restarting_worker_cannot_wipe_its_own_track_record() {
         let mut adapter = MeshAdapter::empty();
         adapter
-            .register_agent(AgentRegistration::new("worker-01", "Worker", AgentRole::Coder))
+            .register_agent(AgentRegistration::new(
+                "worker-01",
+                "Worker",
+                AgentRole::Coder,
+            ))
             .unwrap();
 
         // Give it a history.
@@ -699,9 +758,15 @@ mod tests {
 
         assert!(!ack.created);
         let node = adapter.mesh.node("worker-01").unwrap();
-        assert_eq!(node.label, "Worker v2", "the declaration still updates what it can");
+        assert_eq!(
+            node.label, "Worker v2",
+            "the declaration still updates what it can"
+        );
         assert_eq!(node.telemetry.attempts, 40, "history survives");
-        assert!(node.capability.performance < 0.2, "a declaration cannot overwrite a measurement");
+        assert!(
+            node.capability.performance < 0.2,
+            "a declaration cannot overwrite a measurement"
+        );
         assert!(
             node.resources.observed_latency_ms > 0.0,
             "nor can it discard observed cost"
@@ -733,7 +798,10 @@ mod tests {
         assert_eq!(plan.agent_for(PipelineStage::Code), Some("coder-01"));
         assert_eq!(plan.primary_agent(), Some("coder-01"));
         assert!(plan.expected_latency_ms > 0.0);
-        assert_eq!(adapter.mesh.global.omega, omega_before, "planning is not learning");
+        assert_eq!(
+            adapter.mesh.global.omega, omega_before,
+            "planning is not learning"
+        );
         assert_eq!(adapter.mesh.global.epoch, epoch_before);
         assert_eq!(adapter.open_runs().len(), 1);
     }
@@ -762,11 +830,20 @@ mod tests {
             adapter.execute(&envelope()).unwrap();
         }
 
-        adapter.report_many(&plan.run_id, report_plan(&plan, 0.9, 1_000.0, 0.1)).unwrap();
+        adapter
+            .report_many(&plan.run_id, report_plan(&plan, 0.9, 1_000.0, 0.1))
+            .unwrap();
         let receipt = adapter.finalize(&plan.run_id).unwrap();
 
-        let used: Vec<&str> = receipt.stages.iter().filter_map(|s| s.agent_id.as_deref()).collect();
-        assert_eq!(used, promised, "the caller already dispatched to these agents");
+        let used: Vec<&str> = receipt
+            .stages
+            .iter()
+            .filter_map(|s| s.agent_id.as_deref())
+            .collect();
+        assert_eq!(
+            used, promised,
+            "the caller already dispatched to these agents"
+        );
     }
 
     // --- reporting ---------------------------------------------------------
@@ -830,11 +907,18 @@ mod tests {
         let plan = adapter.plan(&envelope()).unwrap();
 
         let mut batch = report_plan(&plan, 0.9, 100.0, 0.1);
-        batch.push(StageOutcomeReport::success(PipelineStage::Code, "impostor", 1.0));
+        batch.push(StageOutcomeReport::success(
+            PipelineStage::Code,
+            "impostor",
+            1.0,
+        ));
 
         assert!(adapter.report_many(&plan.run_id, batch).is_err());
         let status = adapter.status(&plan.run_id).unwrap();
-        assert!(status.reported.is_empty(), "nothing landed, so the caller knows where it stands");
+        assert!(
+            status.reported.is_empty(),
+            "nothing landed, so the caller knows where it stands"
+        );
         assert_eq!(status.missing.len(), 5);
     }
 
@@ -852,7 +936,9 @@ mod tests {
         assert_eq!(status.reported, vec![PipelineStage::Plan]);
         assert_eq!(status.missing.len(), 4);
 
-        adapter.report_many(&plan.run_id, reports[1..].to_vec()).unwrap();
+        adapter
+            .report_many(&plan.run_id, reports[1..].to_vec())
+            .unwrap();
         assert!(adapter.status(&plan.run_id).unwrap().complete);
     }
 
@@ -863,7 +949,10 @@ mod tests {
         assert_eq!(adapter.finalize("nope").unwrap_err().status(), 404);
         assert_eq!(
             adapter
-                .report("nope", StageOutcomeReport::success(PipelineStage::Code, "a", 1.0))
+                .report(
+                    "nope",
+                    StageOutcomeReport::success(PipelineStage::Code, "a", 1.0)
+                )
                 .unwrap_err()
                 .status(),
             404
@@ -897,7 +986,10 @@ mod tests {
 
         let receipt = adapter.finalize_partial(&plan.run_id).unwrap();
         assert_eq!(receipt.provenance, OutcomeProvenance::Mixed);
-        assert!(!receipt.provenance.is_real(), "a story with holes is not evidence");
+        assert!(
+            !receipt.provenance.is_real(),
+            "a story with holes is not evidence"
+        );
     }
 
     #[test]
@@ -907,7 +999,9 @@ mod tests {
         let digest = adapter.mesh.digest();
 
         let plan = adapter.plan(&envelope()).unwrap();
-        adapter.report_many(&plan.run_id, report_plan(&plan, 1.0, 100.0, 0.1)).unwrap();
+        adapter
+            .report_many(&plan.run_id, report_plan(&plan, 1.0, 100.0, 0.1))
+            .unwrap();
         adapter.cancel(&plan.run_id).unwrap();
 
         assert_eq!(adapter.mesh.global.omega, omega);
@@ -927,7 +1021,9 @@ mod tests {
         assert!(!rehearsal.provenance.is_real());
 
         let plan = adapter.plan(&envelope()).unwrap();
-        adapter.report_many(&plan.run_id, report_plan(&plan, 0.95, 3_000.0, 0.2)).unwrap();
+        adapter
+            .report_many(&plan.run_id, report_plan(&plan, 0.95, 3_000.0, 0.2))
+            .unwrap();
         let real = adapter.finalize(&plan.run_id).unwrap();
 
         assert!(real.provenance.is_real());
@@ -943,14 +1039,19 @@ mod tests {
 
         for _ in 0..3 {
             let plan = adapter.plan(&envelope()).unwrap();
-            adapter.report_many(&plan.run_id, report_plan(&plan, 0.9, 6_000.0, 0.25)).unwrap();
+            adapter
+                .report_many(&plan.run_id, report_plan(&plan, 0.9, 6_000.0, 0.25))
+                .unwrap();
             adapter.finalize(&plan.run_id).unwrap();
         }
 
         let after = adapter.mesh.node("coder-01").unwrap().resources;
         assert!(after.is_observed());
         assert!((after.observed_latency_ms - 6_000.0).abs() < 1.0);
-        assert!((after.latency - 0.1).abs() < 1e-3, "6s against a 60s ceiling");
+        assert!(
+            (after.latency - 0.1).abs() < 1e-3,
+            "6s against a 60s ceiling"
+        );
     }
 
     #[test]
@@ -964,7 +1065,9 @@ mod tests {
             .unwrap()
             .expected_latency_ms;
 
-        adapter.report_many(&first.run_id, report_plan(&first, 0.9, 1_500.0, 0.05)).unwrap();
+        adapter
+            .report_many(&first.run_id, report_plan(&first, 0.9, 1_500.0, 0.05))
+            .unwrap();
         adapter.finalize(&first.run_id).unwrap();
 
         let second = adapter.plan(&envelope()).unwrap();
@@ -976,7 +1079,10 @@ mod tests {
             .expected_latency_ms;
 
         assert_ne!(declared, measured);
-        assert!((measured - 1_500.0).abs() < 1.0, "the plan now quotes what was measured");
+        assert!(
+            (measured - 1_500.0).abs() < 1.0,
+            "the plan now quotes what was measured"
+        );
     }
 
     #[test]
@@ -993,7 +1099,9 @@ mod tests {
                 let reports: Vec<StageOutcomeReport> = plan
                     .stages
                     .iter()
-                    .map(|planned| StageOutcomeReport::failure(planned.stage, &planned.agent_id, error))
+                    .map(|planned| {
+                        StageOutcomeReport::failure(planned.stage, &planned.agent_id, error)
+                    })
                     .collect();
                 adapter.report_many(&plan.run_id, reports).unwrap();
                 adapter.finalize(&plan.run_id).unwrap();
@@ -1029,7 +1137,11 @@ mod tests {
     #[test]
     fn a_replay_that_names_agents_this_mesh_would_not_choose_is_surfaced_not_swallowed() {
         let mut adapter = MeshAdapter::new();
-        let stale = vec![StageOutcomeReport::success(PipelineStage::Code, "retired-agent", 0.9)];
+        let stale = vec![StageOutcomeReport::success(
+            PipelineStage::Code,
+            "retired-agent",
+            0.9,
+        )];
 
         let error = adapter.submit_reported(&envelope(), stale).unwrap_err();
         assert!(matches!(error, ContractError::Mismatch { .. }));
@@ -1062,7 +1174,10 @@ mod tests {
         assert!(plan.stages.is_empty(), "nobody to route to");
         let receipt = adapter.finalize(&plan.run_id).unwrap();
         assert!(!receipt.verified);
-        assert!(!receipt.accepted, "an unstaffed mesh escalates rather than claiming a pass");
+        assert!(
+            !receipt.accepted,
+            "an unstaffed mesh escalates rather than claiming a pass"
+        );
         assert!(receipt.selected_agent.is_none());
     }
 
@@ -1094,13 +1209,19 @@ mod tests {
 
         let receipt = adapter.execute(&envelope()).unwrap();
         assert!(!receipt.decision_head.is_intact());
-        assert_eq!(receipt.decision_head.name, "native", "it fell back rather than dying");
+        assert_eq!(
+            receipt.decision_head.name, "native",
+            "it fell back rather than dying"
+        );
 
         // The reason differs by build — a missing file with `--features onnx`, an
         // unavailable backend without it — but either way it has to reach the operator as
         // text, not as a bare boolean they have to interpret.
         let reason = receipt.decision_head.degraded.as_deref().unwrap();
-        assert!(reason.contains("onnx"), "unhelpful degradation reason: {reason}");
+        assert!(
+            reason.contains("onnx"),
+            "unhelpful degradation reason: {reason}"
+        );
     }
 
     #[test]

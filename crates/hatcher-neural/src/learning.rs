@@ -10,7 +10,8 @@
 //! if a domain was not exercised, it decays.
 
 use hatcher_core::{
-    AgentNode, ErrorClass, MemoryRecord, MeshCoefficients, OutcomeProvenance, PipelineStage, RuntimeCalibration,
+    AgentNode, ErrorClass, MemoryRecord, MeshCoefficients, OutcomeProvenance, PipelineStage,
+    RuntimeCalibration,
 };
 
 use crate::equations::{confidence_update, memory_update, specialization_update};
@@ -62,7 +63,11 @@ impl StageOutcome {
             confidence: 0.5,
             quality: if success { 1.0 } else { 0.0 },
             novelty: 0.5,
-            error: if success { ErrorClass::None } else { ErrorClass::Quality },
+            error: if success {
+                ErrorClass::None
+            } else {
+                ErrorClass::Quality
+            },
             latency_ms: 0.0,
             cost: 0.0,
             provenance: OutcomeProvenance::Simulated,
@@ -76,7 +81,8 @@ impl StageOutcome {
     /// stops a mesh from consolidating mediocrity into `M_i` just because it technically
     /// did not fail.
     pub fn salience(&self) -> f64 {
-        (BASE_SALIENCE * (0.5 + 0.5 * self.novelty) * (0.5 + 0.5 * self.quality.clamp(0.0, 1.0))).clamp(0.0, 1.0)
+        (BASE_SALIENCE * (0.5 + 0.5 * self.novelty) * (0.5 + 0.5 * self.quality.clamp(0.0, 1.0)))
+            .clamp(0.0, 1.0)
     }
 
     /// Turn the outcome into a memory record.
@@ -149,7 +155,12 @@ pub fn calibrate_confidence(
     } else {
         (0.0, (0.5 + 0.5 * claimed) * blame.clamp(0.0, 1.0))
     };
-    node.confidence = confidence_update(node.confidence, success_evidence, error_evidence, coefficients);
+    node.confidence = confidence_update(
+        node.confidence,
+        success_evidence,
+        error_evidence,
+        coefficients,
+    );
 }
 
 /// Fold a measured latency and cost into the agent's resource profile.
@@ -158,7 +169,11 @@ pub fn calibrate_confidence(
 /// profile, so feeding it back would be a closed loop that drifts the profile with every
 /// rehearsal and calls the drift evidence. The mesh learns what an agent costs from the
 /// world, or it does not learn it at all.
-pub fn observe_resources(node: &mut AgentNode, outcome: &StageOutcome, calibration: &RuntimeCalibration) {
+pub fn observe_resources(
+    node: &mut AgentNode,
+    outcome: &StageOutcome,
+    calibration: &RuntimeCalibration,
+) {
     if outcome.provenance != OutcomeProvenance::Reported {
         return;
     }
@@ -172,7 +187,12 @@ pub fn observe_resources(node: &mut AgentNode, outcome: &StageOutcome, calibrati
 }
 
 /// `M_i(t+1) = M_i(t) + η K_i − δ R_i`
-pub fn consolidate_memory(node: &mut AgentNode, knowledge: f64, decay: f64, coefficients: &MeshCoefficients) {
+pub fn consolidate_memory(
+    node: &mut AgentNode,
+    knowledge: f64,
+    decay: f64,
+    coefficients: &MeshCoefficients,
+) {
     node.telemetry.knowledge += knowledge.max(0.0);
     node.telemetry.decay += decay.max(0.0);
     node.capability.memory = memory_update(node.capability.memory, knowledge, decay, coefficients);
@@ -191,8 +211,12 @@ pub fn grow_specialization(
     coefficients: &MeshCoefficients,
 ) {
     node.telemetry.obsolescence += obsolescence.max(0.0);
-    node.capability.specialization =
-        specialization_update(node.capability.specialization, experience, obsolescence, coefficients);
+    node.capability.specialization = specialization_update(
+        node.capability.specialization,
+        experience,
+        obsolescence,
+        coefficients,
+    );
 
     let current = node.mastery(domain);
     let updated = specialization_update(current, experience, 0.0, coefficients);
@@ -204,7 +228,11 @@ pub fn grow_specialization(
 /// Returns the total obsolescence pressure applied, which is part of the drift term
 /// `D` in the `Ω` update: a mesh whose expertise is aging is drifting from what its
 /// objectives now require.
-pub fn obsolescence_sweep(node: &mut AgentNode, exercised_domain: &str, coefficients: &MeshCoefficients) -> f64 {
+pub fn obsolescence_sweep(
+    node: &mut AgentNode,
+    exercised_domain: &str,
+    coefficients: &MeshCoefficients,
+) -> f64 {
     let stale: Vec<String> = node
         .expertise
         .keys()
@@ -250,7 +278,13 @@ pub fn apply_outcome(
     // protects is `C_i`, which is a belief about the agent's *reasoning*, and the trust
     // ledger, which is a peer judgement about its *work*. Neither was tested here.
     record_attempt(node, outcome.success, outcome.stage);
-    calibrate_confidence(node, outcome.success, outcome.confidence, blame, coefficients);
+    calibrate_confidence(
+        node,
+        outcome.success,
+        outcome.confidence,
+        blame,
+        coefficients,
+    );
     consolidate_memory(node, knowledge, decay, coefficients);
     observe_resources(node, outcome, calibration);
 
@@ -289,7 +323,11 @@ mod tests {
             confidence,
             quality: if success { 0.8 } else { 0.1 },
             novelty: 0.8,
-            error: if success { ErrorClass::None } else { ErrorClass::Quality },
+            error: if success {
+                ErrorClass::None
+            } else {
+                ErrorClass::Quality
+            },
             latency_ms: 0.0,
             cost: 0.0,
             provenance: OutcomeProvenance::Simulated,
@@ -312,15 +350,26 @@ mod tests {
         for _ in 0..8 {
             record_attempt(&mut node, true, PipelineStage::Code);
         }
-        assert!(node.capability.performance > 0.8, "a success streak raises P");
+        assert!(
+            node.capability.performance > 0.8,
+            "a success streak raises P"
+        );
         assert_eq!(node.telemetry.attempts, 8);
         assert_eq!(node.telemetry.successes, 8);
 
         for _ in 0..20 {
             record_attempt(&mut node, false, PipelineStage::Code);
         }
-        assert!(node.capability.performance < 0.4, "sustained failure lowers P");
-        assert!(node.telemetry.last_action.as_deref().unwrap().contains("failed"));
+        assert!(
+            node.capability.performance < 0.4,
+            "sustained failure lowers P"
+        );
+        assert!(node
+            .telemetry
+            .last_action
+            .as_deref()
+            .unwrap()
+            .contains("failed"));
     }
 
     #[test]
@@ -345,7 +394,13 @@ mod tests {
         let coefficients = MeshCoefficients::default();
 
         let mut at_fault = agent();
-        calibrate_confidence(&mut at_fault, false, 0.9, ErrorClass::Quality.blame_weight(), &coefficients);
+        calibrate_confidence(
+            &mut at_fault,
+            false,
+            0.9,
+            ErrorClass::Quality.blame_weight(),
+            &coefficients,
+        );
         let mut throttled = agent();
         calibrate_confidence(
             &mut throttled,
@@ -359,7 +414,10 @@ mod tests {
             throttled.confidence > at_fault.confidence,
             "nothing about the throttled agent's reasoning was tested"
         );
-        assert!(throttled.confidence < 0.5, "but the run still did not deliver");
+        assert!(
+            throttled.confidence < 0.5,
+            "but the run still did not deliver"
+        );
     }
 
     #[test]
@@ -379,7 +437,10 @@ mod tests {
         );
 
         assert_eq!(staleness, 0.0);
-        assert_eq!(node, before, "a withdrawn run is not evidence about anything");
+        assert_eq!(
+            node, before,
+            "a withdrawn run is not evidence about anything"
+        );
     }
 
     #[test]
@@ -402,7 +463,14 @@ mod tests {
         let mut rehearsed = agent();
         let mut simulated = reported(ErrorClass::None, 3_000.0, 0.12);
         simulated.provenance = OutcomeProvenance::Simulated;
-        apply_outcome(&mut rehearsed, &simulated, 0.4, 0.0, &coefficients, &calibration);
+        apply_outcome(
+            &mut rehearsed,
+            &simulated,
+            0.4,
+            0.0,
+            &coefficients,
+            &calibration,
+        );
         assert!(
             !rehearsed.resources.is_observed(),
             "a simulated latency is derived from this profile; folding it back is a closed loop"
@@ -438,7 +506,10 @@ mod tests {
             unlucky.mastery("rust") > blamed.mastery("rust"),
             "the agent did the work; it just never got to finish"
         );
-        assert_eq!(unlucky.telemetry.attempts, blamed.telemetry.attempts, "both cost a slot");
+        assert_eq!(
+            unlucky.telemetry.attempts, blamed.telemetry.attempts,
+            "both cost a slot"
+        );
     }
 
     #[test]
@@ -463,7 +534,10 @@ mod tests {
             grow_specialization(&mut node, "rust", 1.0, 0.0, &coefficients);
         }
         assert!(node.mastery("rust") > 0.6);
-        assert!((node.mastery("python") - 0.6).abs() < 1e-12, "untouched domains are untouched here");
+        assert!(
+            (node.mastery("python") - 0.6).abs() < 1e-12,
+            "untouched domains are untouched here"
+        );
         assert!(node.capability.specialization > 0.5);
     }
 
@@ -474,7 +548,10 @@ mod tests {
         let applied = obsolescence_sweep(&mut node, "rust", &coefficients);
         assert!(applied > 0.0);
         assert!(node.mastery("python") < 0.6);
-        assert!((node.mastery("rust") - 0.6).abs() < 1e-12, "the exercised domain is spared");
+        assert!(
+            (node.mastery("rust") - 0.6).abs() < 1e-12,
+            "the exercised domain is spared"
+        );
     }
 
     #[test]
@@ -505,14 +582,24 @@ mod tests {
         let mut node = agent();
         let before = node.capability;
 
-        apply_outcome(&mut node, &outcome(true, 0.9), 0.5, 0.0, &coefficients, &calibration);
+        apply_outcome(
+            &mut node,
+            &outcome(true, 0.9),
+            0.5,
+            0.0,
+            &coefficients,
+            &calibration,
+        );
 
         assert!(node.capability.performance != before.performance);
         assert!(node.capability.memory > before.memory);
         assert!(node.capability.specialization > before.specialization);
         assert!(node.confidence > 0.5);
         assert!(node.mastery("rust") > 0.6);
-        assert!(node.mastery("python") < 0.6, "working rust ages the python mastery");
+        assert!(
+            node.mastery("python") < 0.6,
+            "working rust ages the python mastery"
+        );
     }
 
     #[test]
@@ -520,10 +607,20 @@ mod tests {
         let coefficients = MeshCoefficients::default();
         let calibration = RuntimeCalibration::default();
         let mut node = agent();
-        apply_outcome(&mut node, &outcome(false, 0.9), 0.1, 0.0, &coefficients, &calibration);
+        apply_outcome(
+            &mut node,
+            &outcome(false, 0.9),
+            0.1,
+            0.0,
+            &coefficients,
+            &calibration,
+        );
 
         assert!(node.confidence < 0.5, "confidence drops");
-        assert!(node.capability.specialization > 0.5, "but the attempt is still practice");
+        assert!(
+            node.capability.specialization > 0.5,
+            "but the attempt is still practice"
+        );
         assert_eq!(node.telemetry.failures, 1);
     }
 

@@ -216,7 +216,11 @@ mod tests {
         assert_eq!(state.regime(), OmegaRegime::Eroding);
 
         state.omega = 0.1;
-        assert_eq!(state.regime(), OmegaRegime::Degraded, "a collapsed omega outranks direction");
+        assert_eq!(
+            state.regime(),
+            OmegaRegime::Degraded,
+            "a collapsed omega outranks direction"
+        );
     }
 
     #[test]

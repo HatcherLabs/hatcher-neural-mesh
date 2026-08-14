@@ -21,7 +21,8 @@
 use std::collections::BTreeMap;
 
 use hatcher_core::{
-    Assignment, ErrorClass, OutcomeProvenance, PipelineStage, RuntimeCalibration, StageOutcomeReport, TaskSpec,
+    Assignment, ErrorClass, OutcomeProvenance, PipelineStage, RuntimeCalibration,
+    StageOutcomeReport, TaskSpec,
 };
 
 use crate::equations::{deterministic_unit, seed_of};
@@ -119,6 +120,10 @@ const DIFFICULTY_LATENCY_SPAN: f64 = 0.5;
 /// Multiplier applied to a stage that failed. Failures are not free — they burn a
 /// timeout or a full generation before anyone finds out they were wrong.
 const FAILURE_LATENCY_PENALTY: f64 = 1.35;
+const _: () = assert!(
+    FAILURE_LATENCY_PENALTY > 1.0,
+    "finding out you were wrong is not free"
+);
 
 impl OutcomeSource for SimulatedOutcomes {
     fn resolve(&self, context: &StageContext<'_>) -> ResolvedOutcome {
@@ -127,8 +132,9 @@ impl OutcomeSource for SimulatedOutcomes {
         let node_confidence = node.map(|node| node.confidence).unwrap_or(0.5);
 
         let geometric_competence = assignment.capability.max(0.0).powf(0.2);
-        let modulation =
-            0.60 + 0.25 * assignment.mastery.clamp(0.0, 1.0) + 0.15 * assignment.inbound_trust.clamp(0.0, 1.0);
+        let modulation = 0.60
+            + 0.25 * assignment.mastery.clamp(0.0, 1.0)
+            + 0.15 * assignment.inbound_trust.clamp(0.0, 1.0);
         let competence = (geometric_competence * modulation).clamp(0.0, 1.0);
 
         let difficulty = context.difficulty();
@@ -158,14 +164,25 @@ impl OutcomeSource for SimulatedOutcomes {
         let confidence = (0.6 * node_confidence + 0.4 * quality).clamp(0.0, 1.0);
 
         let expected_latency = node
-            .map(|node| node.resources.expected_latency_ms(context.calibration.latency_ceiling_ms))
+            .map(|node| {
+                node.resources
+                    .expected_latency_ms(context.calibration.latency_ceiling_ms)
+            })
             .unwrap_or(0.0);
         let expected_cost = node
-            .map(|node| node.resources.expected_cost(context.calibration.cost_ceiling))
+            .map(|node| {
+                node.resources
+                    .expected_cost(context.calibration.cost_ceiling)
+            })
             .unwrap_or(0.0);
 
-        let difficulty_scale = 1.0 - DIFFICULTY_LATENCY_SPAN / 2.0 + DIFFICULTY_LATENCY_SPAN * difficulty;
-        let failure_scale = if success { 1.0 } else { FAILURE_LATENCY_PENALTY };
+        let difficulty_scale =
+            1.0 - DIFFICULTY_LATENCY_SPAN / 2.0 + DIFFICULTY_LATENCY_SPAN * difficulty;
+        let failure_scale = if success {
+            1.0
+        } else {
+            FAILURE_LATENCY_PENALTY
+        };
         let latency_ms = expected_latency * difficulty_scale * failure_scale;
         let cost = expected_cost * difficulty_scale;
 
@@ -177,7 +194,11 @@ impl OutcomeSource for SimulatedOutcomes {
             cost,
             // A competence model can only ever produce competence failures. Labelling
             // them anything else would put a cause in the trace that nothing measured.
-            error: if success { ErrorClass::None } else { ErrorClass::Quality },
+            error: if success {
+                ErrorClass::None
+            } else {
+                ErrorClass::Quality
+            },
             provenance: OutcomeProvenance::Simulated,
             note: format!(
                 "{} by {} | fitness={:.3} threshold={:.3} draw={:.3} carry={:.2}",
@@ -225,7 +246,10 @@ impl ReportedOutcomes {
     /// this usable for a runtime that retries a station.
     pub fn new(reports: impl IntoIterator<Item = StageOutcomeReport>) -> Self {
         Self {
-            reports: reports.into_iter().map(|report| (report.stage, report)).collect(),
+            reports: reports
+                .into_iter()
+                .map(|report| (report.stage, report))
+                .collect(),
             missing: MissingOutcome::Fail,
         }
     }
@@ -385,16 +409,34 @@ mod tests {
         let config = PipelineConfig::default();
         let calibration = RuntimeCalibration::default();
 
-        let first = SimulatedOutcomes.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
-        let second = SimulatedOutcomes.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
+        let first = SimulatedOutcomes.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
+        let second = SimulatedOutcomes.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
         assert_eq!(first, second);
         assert_eq!(first.provenance, OutcomeProvenance::Simulated);
     }
 
     #[test]
     fn a_simulated_failure_is_always_a_competence_failure() {
-        let mesh = NeuralMesh::with_cohort(vec![hatcher_core::AgentNode::new("weak", "weak", AgentRole::Coder)
-            .with_capability(hatcher_core::CapabilityVector::uniform(0.02))]);
+        let mesh = NeuralMesh::with_cohort(vec![hatcher_core::AgentNode::new(
+            "weak",
+            "weak",
+            AgentRole::Coder,
+        )
+        .with_capability(hatcher_core::CapabilityVector::uniform(0.02))]);
         let mut task = task();
         task.uncertainty = 1.0;
         task.implementation_cost = 1.0;
@@ -402,7 +444,14 @@ mod tests {
         let assignment = coding_assignment(&mesh, &task);
         let config = PipelineConfig::default();
         let calibration = RuntimeCalibration::default();
-        let outcome = SimulatedOutcomes.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
+        let outcome = SimulatedOutcomes.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
 
         assert!(!outcome.success);
         assert_eq!(
@@ -420,14 +469,23 @@ mod tests {
         let config = PipelineConfig::default();
         let calibration = RuntimeCalibration::default();
 
-        let clean = SimulatedOutcomes.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
-        let poisoned = SimulatedOutcomes.resolve(&context(&mesh, &task, &assignment, 0.55, &config, &calibration));
+        let clean = SimulatedOutcomes.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
+        let poisoned = SimulatedOutcomes.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            0.55,
+            &config,
+            &calibration,
+        ));
         assert!(!poisoned.success || clean.success);
-    }
-
-    #[test]
-    fn a_failed_stage_costs_more_time_than_a_successful_one() {
-        assert!(FAILURE_LATENCY_PENALTY > 1.0, "finding out you were wrong is not free");
     }
 
     #[test]
@@ -438,7 +496,14 @@ mod tests {
         let config = PipelineConfig::default();
         let calibration = RuntimeCalibration::default();
 
-        let outcome = SimulatedOutcomes.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
+        let outcome = SimulatedOutcomes.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
         assert!(
             (outcome.quality - outcome.confidence).abs() > 1e-9,
             "a producer's confidence must not be its reviewer's score"
@@ -461,7 +526,14 @@ mod tests {
         .with_latency_ms(4_200.0)
         .with_cost(0.17)]);
 
-        let outcome = source.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
+        let outcome = source.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
         assert!(outcome.success);
         assert_eq!(outcome.quality, 0.91);
         assert_eq!(outcome.latency_ms, 4_200.0);
@@ -483,8 +555,18 @@ mod tests {
             1.0,
         )]);
 
-        let outcome = source.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
-        assert!(!outcome.success, "crediting the wrong agent teaches the mesh a lie");
+        let outcome = source.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
+        assert!(
+            !outcome.success,
+            "crediting the wrong agent teaches the mesh a lie"
+        );
         assert_eq!(outcome.error, ErrorClass::Unknown);
         assert!(outcome.note.contains("discarded"));
     }
@@ -498,7 +580,14 @@ mod tests {
         let calibration = RuntimeCalibration::default();
 
         let source = ReportedOutcomes::new([]);
-        let outcome = source.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
+        let outcome = source.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
         assert!(!outcome.success);
         assert_eq!(outcome.error, ErrorClass::Unknown);
     }
@@ -512,7 +601,14 @@ mod tests {
         let calibration = RuntimeCalibration::default();
 
         let source = ReportedOutcomes::new([]).simulating_gaps();
-        let outcome = source.resolve(&context(&mesh, &task, &assignment, 1.0, &config, &calibration));
+        let outcome = source.resolve(&context(
+            &mesh,
+            &task,
+            &assignment,
+            1.0,
+            &config,
+            &calibration,
+        ));
         assert_eq!(
             outcome.provenance,
             OutcomeProvenance::Simulated,
@@ -524,7 +620,11 @@ mod tests {
     fn a_source_tracks_which_stages_are_still_outstanding() {
         let mut source = ReportedOutcomes::new([]);
         assert!(source.is_empty());
-        source.insert(StageOutcomeReport::success(PipelineStage::Plan, "planner-01", 0.8));
+        source.insert(StageOutcomeReport::success(
+            PipelineStage::Plan,
+            "planner-01",
+            0.8,
+        ));
 
         let expected = [PipelineStage::Plan, PipelineStage::Code];
         assert_eq!(source.missing_from(&expected), vec![PipelineStage::Code]);
@@ -539,7 +639,11 @@ mod tests {
             "coder-01",
             ErrorClass::Timeout,
         )]);
-        let previous = source.insert(StageOutcomeReport::success(PipelineStage::Code, "coder-01", 0.9));
+        let previous = source.insert(StageOutcomeReport::success(
+            PipelineStage::Code,
+            "coder-01",
+            0.9,
+        ));
 
         assert!(previous.is_some());
         assert_eq!(source.len(), 1);

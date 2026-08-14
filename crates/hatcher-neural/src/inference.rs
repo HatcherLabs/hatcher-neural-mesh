@@ -30,7 +30,10 @@ pub enum InferenceError {
     /// The model file could not be found.
     ModelNotFound { path: String },
     /// The backend was requested but the crate was built without its feature.
-    BackendUnavailable { backend: &'static str, feature: &'static str },
+    BackendUnavailable {
+        backend: &'static str,
+        feature: &'static str,
+    },
     /// The runtime rejected the model or the call.
     Runtime { detail: String },
 }
@@ -125,16 +128,17 @@ impl Decision {
         } else {
             softmax(values)
         };
-        let (index, confidence) = normalized
-            .iter()
-            .enumerate()
-            .fold((0usize, f64::MIN), |acc, (index, value)| {
-                if *value > acc.1 {
-                    (index, *value)
-                } else {
-                    acc
-                }
-            });
+        let (index, confidence) =
+            normalized
+                .iter()
+                .enumerate()
+                .fold((0usize, f64::MIN), |acc, (index, value)| {
+                    if *value > acc.1 {
+                        (index, *value)
+                    } else {
+                        acc
+                    }
+                });
 
         Self {
             action: Self::ACTION_ORDER
@@ -150,7 +154,9 @@ impl Decision {
 /// Whether a vector is already a probability distribution.
 pub fn is_distribution(values: &[f64]) -> bool {
     !values.is_empty()
-        && values.iter().all(|value| value.is_finite() && *value >= 0.0)
+        && values
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
         && (values.iter().sum::<f64>() - 1.0).abs() < 1e-6
 }
 
@@ -159,11 +165,21 @@ pub fn softmax(values: &[f64]) -> Vec<f64> {
     if values.is_empty() {
         return Vec::new();
     }
-    let max = values.iter().copied().filter(|v| v.is_finite()).fold(f64::MIN, f64::max);
+    let max = values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .fold(f64::MIN, f64::max);
     let max = if max.is_finite() { max } else { 0.0 };
     let exponentiated: Vec<f64> = values
         .iter()
-        .map(|value| if value.is_finite() { (*value - max).exp() } else { 0.0 })
+        .map(|value| {
+            if value.is_finite() {
+                (*value - max).exp()
+            } else {
+                0.0
+            }
+        })
         .collect();
     let sum: f64 = exponentiated.iter().sum();
     if sum <= 0.0 {
@@ -216,7 +232,9 @@ impl NativeBackend {
             return Err(InferenceError::Runtime {
                 detail: format!(
                     "hidden weights must be {}x{}, got {:?}",
-                    spec.hidden_dim, spec.input_dim, hidden_weights.shape()
+                    spec.hidden_dim,
+                    spec.input_dim,
+                    hidden_weights.shape()
                 ),
             });
         }
@@ -224,7 +242,9 @@ impl NativeBackend {
             return Err(InferenceError::Runtime {
                 detail: format!(
                     "output weights must be {}x{}, got {:?}",
-                    spec.output_dim, spec.hidden_dim, output_weights.shape()
+                    spec.output_dim,
+                    spec.hidden_dim,
+                    output_weights.shape()
                 ),
             });
         }
@@ -248,7 +268,9 @@ impl NativeBackend {
     }
 
     fn init_vector(len: usize, seed: u64) -> Array1<f64> {
-        Array1::from_shape_fn(len, |index| deterministic_unit(seed ^ index as u64) * 0.1 - 0.05)
+        Array1::from_shape_fn(len, |index| {
+            deterministic_unit(seed ^ index as u64) * 0.1 - 0.05
+        })
     }
 }
 
@@ -326,7 +348,10 @@ impl BackendKind {
 ///
 /// Returns the backend plus the error that forced the fallback, if any, so the
 /// caller can surface a degraded-mode warning instead of pretending all is well.
-pub fn resolve_or_native(kind: &BackendKind, spec: ModelSpec) -> (SharedBackend, Option<InferenceError>) {
+pub fn resolve_or_native(
+    kind: &BackendKind,
+    spec: ModelSpec,
+) -> (SharedBackend, Option<InferenceError>) {
     match kind.resolve(spec.clone()) {
         Ok(backend) => (backend, None),
         Err(error) => (Arc::new(NativeBackend::new(spec)), Some(error)),
@@ -362,7 +387,9 @@ mod tests {
     fn native_backend_responds_to_its_input() {
         let backend = NativeBackend::default();
         let calm = backend.forward(&[0.0; 8]).unwrap();
-        let loud = backend.forward(&[1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]).unwrap();
+        let loud = backend
+            .forward(&[1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
+            .unwrap();
         assert_ne!(calm, loud, "the head must actually depend on features");
     }
 
@@ -371,7 +398,10 @@ mod tests {
         let backend = NativeBackend::default();
         assert_eq!(
             backend.forward(&[0.1]),
-            Err(InferenceError::InputShape { expected: 8, actual: 1 })
+            Err(InferenceError::InputShape {
+                expected: 8,
+                actual: 1
+            })
         );
 
         let conformed = backend.conform(&[0.1; 12]);
@@ -401,7 +431,10 @@ mod tests {
         let uniform = softmax(&[f64::NAN, f64::NAN]);
         assert!((uniform.iter().sum::<f64>() - 1.0).abs() < 1e-9);
         let big = softmax(&[1000.0, 1000.0]);
-        assert!((big[0] - 0.5).abs() < 1e-9, "large logits must not overflow");
+        assert!(
+            (big[0] - 0.5).abs() < 1e-9,
+            "large logits must not overflow"
+        );
     }
 
     #[test]

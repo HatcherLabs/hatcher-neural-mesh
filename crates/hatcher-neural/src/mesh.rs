@@ -23,10 +23,11 @@
 //! residual, so an isolated node keeps its own signal instead of decaying to zero.
 
 use hatcher_core::{
-    canonical_digest, fold_digests, AgentNode, AgentRole, AgentSummary, CapabilityVector, DecisionHead,
-    ExecutionMode, GlobalState, MemoryGraph, MeshAnalytics, MeshCoefficients, MeshConfigView, MeshEdge,
-    MeshGraphView, MeshIntelligence, MeshOverview, MeshSimulation, MeshState, MeshStepResult, ModelSpec,
-    OmegaDelta, OmegaLedger, OmegaSample, PriorityScore, ResourceProfile, TaskSpec, TrustMatrixView,
+    canonical_digest, fold_digests, AgentNode, AgentRole, AgentSummary, CapabilityVector,
+    DecisionHead, ExecutionMode, GlobalState, MemoryGraph, MeshAnalytics, MeshCoefficients,
+    MeshConfigView, MeshEdge, MeshGraphView, MeshIntelligence, MeshOverview, MeshSimulation,
+    MeshState, MeshStepResult, ModelSpec, OmegaDelta, OmegaLedger, OmegaSample, PriorityScore,
+    ResourceProfile, TaskSpec, TrustMatrixView,
 };
 
 use crate::equations::{
@@ -114,7 +115,11 @@ impl NeuralMesh {
     }
 
     /// Bind a backend, surfacing the load failure instead of degrading.
-    pub fn try_with_backend(mut self, kind: BackendKind, spec: ModelSpec) -> Result<Self, InferenceError> {
+    pub fn try_with_backend(
+        mut self,
+        kind: BackendKind,
+        spec: ModelSpec,
+    ) -> Result<Self, InferenceError> {
         self.backend = kind.resolve(spec)?;
         self.backend_kind = kind;
         self.degraded = None;
@@ -185,7 +190,8 @@ impl NeuralMesh {
                 if from == to {
                     continue;
                 }
-                self.trust.set_latency(from, to, (from_latency + to_latency) / 2.0);
+                self.trust
+                    .set_latency(from, to, (from_latency + to_latency) / 2.0);
             }
         }
     }
@@ -238,7 +244,11 @@ impl NeuralMesh {
         )
         .into_iter()
         .filter_map(|(i, j, contribution)| {
-            Some((self.nodes.get(i)?.id.clone(), self.nodes.get(j)?.id.clone(), contribution))
+            Some((
+                self.nodes.get(i)?.id.clone(),
+                self.nodes.get(j)?.id.clone(),
+                contribution,
+            ))
         })
         .collect()
     }
@@ -254,7 +264,11 @@ impl NeuralMesh {
         if self.nodes.is_empty() {
             return 0.0;
         }
-        self.nodes.iter().map(|node| node.capability.memory).sum::<f64>() / self.nodes.len() as f64
+        self.nodes
+            .iter()
+            .map(|node| node.capability.memory)
+            .sum::<f64>()
+            / self.nodes.len() as f64
     }
 
     /// Mesh confidence about a specific domain: confidence weighted by mastery.
@@ -303,7 +317,9 @@ impl NeuralMesh {
     /// Run an explicit number of message-passing rounds.
     pub fn message_pass_rounds(&self, seeds: &[f64], rounds: usize) -> Vec<f64> {
         let n = self.nodes.len();
-        let mut activations: Vec<f64> = (0..n).map(|index| seeds.get(index).copied().unwrap_or(0.0)).collect();
+        let mut activations: Vec<f64> = (0..n)
+            .map(|index| seeds.get(index).copied().unwrap_or(0.0))
+            .collect();
         if n < 2 {
             return activations;
         }
@@ -361,12 +377,21 @@ impl NeuralMesh {
             task.budget,
             task.implementation_cost,
         ];
-        input.extend(task.features.iter().copied().filter(|value| value.is_finite()));
+        input.extend(
+            task.features
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite()),
+        );
         input
     }
 
     /// Ask the decision head what to do about a task.
-    pub fn decide(&self, task: &TaskSpec, priority: &PriorityScore) -> Result<Decision, InferenceError> {
+    pub fn decide(
+        &self,
+        task: &TaskSpec,
+        priority: &PriorityScore,
+    ) -> Result<Decision, InferenceError> {
         self.backend.decide(&self.model_input(task, priority))
     }
 
@@ -479,8 +504,14 @@ impl NeuralMesh {
     pub fn edges(&self) -> Vec<MeshEdge> {
         let mut edges = self.trust.edges();
         for edge in &mut edges {
-            let from = self.node(&edge.from).map(|node| node.capability.memory).unwrap_or(0.0);
-            let to = self.node(&edge.to).map(|node| node.capability.memory).unwrap_or(0.0);
+            let from = self
+                .node(&edge.from)
+                .map(|node| node.capability.memory)
+                .unwrap_or(0.0);
+            let to = self
+                .node(&edge.to)
+                .map(|node| node.capability.memory)
+                .unwrap_or(0.0);
             edge.energy = (from + to) / 2.0;
         }
         edges
@@ -549,7 +580,11 @@ impl NeuralMesh {
             .iter()
             .map(|node| self.summarize(node, &hubs, &isolated))
             .collect();
-        summaries.sort_by(|a, b| b.capability.partial_cmp(&a.capability).unwrap_or(std::cmp::Ordering::Equal));
+        summaries.sort_by(|a, b| {
+            b.capability
+                .partial_cmp(&a.capability)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         summaries
     }
 
@@ -563,7 +598,11 @@ impl NeuralMesh {
             intelligence,
             emergence_ratio: intelligence.emergence_ratio(),
             agent_count: self.nodes.len(),
-            active_edge_count: self.edges().iter().filter(|edge| !edge.is_dormant()).count(),
+            active_edge_count: self
+                .edges()
+                .iter()
+                .filter(|edge| !edge.is_dormant())
+                .count(),
             agents: self.agent_summaries(),
             hubs: self.trust.hubs(),
             isolated: self.trust.isolated(),
@@ -707,9 +746,18 @@ mod tests {
         let connected = collaborating.intelligence();
         let alone = idle.intelligence();
 
-        assert!((connected.raw - alone.raw).abs() < 1e-12, "raw capability is identical");
-        assert_eq!(alone.emergent, 0.0, "an idle cohort's links decay to nothing");
-        assert!(connected.emergent > 0.0, "collaboration is where collective intelligence lives");
+        assert!(
+            (connected.raw - alone.raw).abs() < 1e-12,
+            "raw capability is identical"
+        );
+        assert_eq!(
+            alone.emergent, 0.0,
+            "an idle cohort's links decay to nothing"
+        );
+        assert!(
+            connected.emergent > 0.0,
+            "collaboration is where collective intelligence lives"
+        );
         assert!(connected.total > alone.total);
         assert!(connected.emergence_ratio() > alone.emergence_ratio());
     }
@@ -726,15 +774,23 @@ mod tests {
         seeds[0] = 1.0;
         let activations = mesh.message_pass(&seeds);
 
-        let coder = mesh.nodes.iter().position(|node| node.id == "coder-01").unwrap();
-        assert!(activations[coder] > 0.0, "a trusted neighbour must receive signal");
+        let coder = mesh
+            .nodes
+            .iter()
+            .position(|node| node.id == "coder-01")
+            .unwrap();
+        assert!(
+            activations[coder] > 0.0,
+            "a trusted neighbour must receive signal"
+        );
         assert_eq!(activations.len(), mesh.nodes.len());
         assert!(activations.iter().all(|value| (0.0..=1.0).contains(value)));
     }
 
     #[test]
     fn a_single_node_mesh_passes_no_messages() {
-        let mesh = NeuralMesh::with_cohort(vec![AgentNode::new("solo", "solo", AgentRole::Executor)]);
+        let mesh =
+            NeuralMesh::with_cohort(vec![AgentNode::new("solo", "solo", AgentRole::Executor)]);
         assert_eq!(mesh.message_pass(&[0.4]), vec![0.4]);
         assert_eq!(mesh.intelligence().emergent, 0.0);
     }
@@ -769,7 +825,10 @@ mod tests {
         let rust = mesh.domain_confidence("rust");
         let unknown = mesh.domain_confidence("astrophysics");
         assert!(rust > 0.0);
-        assert!((unknown - mesh.mean_confidence()).abs() < 0.2, "unknown domains fall back to the mean");
+        assert!(
+            (unknown - mesh.mean_confidence()).abs() < 0.2,
+            "unknown domains fall back to the mean"
+        );
     }
 
     #[test]
@@ -833,7 +892,11 @@ mod tests {
     fn digest_changes_when_state_changes() {
         let mut mesh = NeuralMesh::default();
         let before = mesh.digest();
-        assert_eq!(before, mesh.digest(), "the digest is stable for fixed state");
+        assert_eq!(
+            before,
+            mesh.digest(),
+            "the digest is stable for fixed state"
+        );
         mesh.step(&task(), 1);
         assert_ne!(before, mesh.digest());
     }
@@ -887,6 +950,9 @@ mod tests {
         );
 
         assert_eq!(mesh.backend().name(), "native", "the mesh keeps running");
-        assert!(mesh.degraded().is_some(), "and says why it is not running onnx");
+        assert!(
+            mesh.degraded().is_some(),
+            "and says why it is not running onnx"
+        );
     }
 }

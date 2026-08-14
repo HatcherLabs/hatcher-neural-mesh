@@ -59,8 +59,13 @@ pub use inference::{
 };
 pub use learning::StageOutcome;
 pub use mesh::{default_cohort, NeuralMesh, MESSAGE_ROUNDS};
-pub use outcomes::{MissingOutcome, OutcomeSource, ReportedOutcomes, ResolvedOutcome, SimulatedOutcomes, StageContext};
-pub use pipeline::{run, run_batch, run_bound, run_with, run_with_outcomes, PipelineConfig, RunInputs};
+pub use outcomes::{
+    MissingOutcome, OutcomeSource, ReportedOutcomes, ResolvedOutcome, SimulatedOutcomes,
+    StageContext,
+};
+pub use pipeline::{
+    run, run_batch, run_bound, run_with, run_with_outcomes, PipelineConfig, RunInputs,
+};
 pub use router::{rank, score_candidate, select};
 pub use trust::{TrustGraph, TrustSettlement};
 
@@ -110,9 +115,13 @@ mod tests {
     use hatcher_core::{AgentRole, ExecutionMode};
 
     fn request() -> HatcherRequest {
-        HatcherRequest::new("agent-1", AgentRole::Orchestrator, ExecutionMode::Controlled)
-            .with_prompt("stress test the mesh")
-            .with_features(vec![0.2, 0.4, 0.6, 0.8])
+        HatcherRequest::new(
+            "agent-1",
+            AgentRole::Orchestrator,
+            ExecutionMode::Controlled,
+        )
+        .with_prompt("stress test the mesh")
+        .with_features(vec![0.2, 0.4, 0.6, 0.8])
     }
 
     #[test]

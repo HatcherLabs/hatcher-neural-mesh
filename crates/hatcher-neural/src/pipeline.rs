@@ -48,7 +48,8 @@
 
 use hatcher_core::{
     canonical_digest, Assignment, ExecutionMode, MeshAction, NeuralSignal, OmegaDelta, OmegaRegime,
-    OutcomeProvenance, PipelineStage, PipelineTrace, PriorityScore, RuntimeCalibration, StageRecord, TaskSpec,
+    OutcomeProvenance, PipelineStage, PipelineTrace, PriorityScore, RuntimeCalibration,
+    StageRecord, TaskSpec,
 };
 
 use crate::inference::Decision;
@@ -226,7 +227,10 @@ pub fn run_bound(mesh: &mut NeuralMesh, task: &TaskSpec, inputs: &RunInputs<'_>)
         };
 
         let selected = match inputs.assignments {
-            Some(bound) => bound.iter().find(|assignment| assignment.stage == stage).cloned(),
+            Some(bound) => bound
+                .iter()
+                .find(|assignment| assignment.stage == stage)
+                .cloned(),
             None => router::select(mesh, stage, task, priority.band, &taken),
         };
 
@@ -292,7 +296,8 @@ pub fn run_bound(mesh: &mut NeuralMesh, task: &TaskSpec, inputs: &RunInputs<'_>)
             // Diminishing returns: an agent already fluent in this domain learns
             // little from doing it again, which is what keeps L from growing forever
             // on repetitive work.
-            novelty: (task.uncertainty * (1.0 - assignment.mastery.clamp(0.0, 1.0))).clamp(0.0, 1.0),
+            novelty: (task.uncertainty * (1.0 - assignment.mastery.clamp(0.0, 1.0)))
+                .clamp(0.0, 1.0),
             error: resolved.error,
             latency_ms: resolved.latency_ms,
             cost: resolved.cost,
@@ -319,7 +324,14 @@ pub fn run_bound(mesh: &mut NeuralMesh, task: &TaskSpec, inputs: &RunInputs<'_>)
     let mut staleness_total = 0.0;
     for (outcome, knowledge, decay) in &credited {
         if let Some(node) = mesh.node_mut(&outcome.agent_id) {
-            staleness_total += apply_outcome(node, outcome, *knowledge, *decay, &coefficients, &inputs.calibration);
+            staleness_total += apply_outcome(
+                node,
+                outcome,
+                *knowledge,
+                *decay,
+                &coefficients,
+                &inputs.calibration,
+            );
             learning_total += *knowledge;
         }
     }
@@ -357,7 +369,10 @@ pub fn run_bound(mesh: &mut NeuralMesh, task: &TaskSpec, inputs: &RunInputs<'_>)
             excused += 1;
             continue;
         }
-        if mesh.trust.record(&from.agent_id, &to.agent_id, downstream_ok) {
+        if mesh
+            .trust
+            .record(&from.agent_id, &to.agent_id, downstream_ok)
+        {
             handoffs += 1;
         }
     }
@@ -365,7 +380,9 @@ pub fn run_bound(mesh: &mut NeuralMesh, task: &TaskSpec, inputs: &RunInputs<'_>)
     // the outcome, which is how a planner that keeps producing unworkable plans loses
     // trust even though it never wrote a line.
     if let (Some(first), Some(last)) = (assignments.first(), assignments.last()) {
-        if first.agent_id != last.agent_id && mesh.trust.record(&last.agent_id, &first.agent_id, verified) {
+        if first.agent_id != last.agent_id
+            && mesh.trust.record(&last.agent_id, &first.agent_id, verified)
+        {
             handoffs += 1;
         }
     }
@@ -388,7 +405,10 @@ pub fn run_bound(mesh: &mut NeuralMesh, task: &TaskSpec, inputs: &RunInputs<'_>)
 
     // --- 10. Ω Update -------------------------------------------------------
     let intelligence = mesh.intelligence();
-    let staffed: Vec<&StageRecord> = stages.iter().filter(|record| record.stage.is_staffed()).collect();
+    let staffed: Vec<&StageRecord> = stages
+        .iter()
+        .filter(|record| record.stage.is_staffed())
+        .collect();
     let executed = staffed.len().max(1) as f64;
     let failed = staffed.iter().filter(|record| !record.success).count() as f64;
 
@@ -542,14 +562,24 @@ fn decide(
         action: action.as_str().to_string(),
         rationale: format!(
             "{} | omega={:.3} A={:.3} P={:.3} ({}) verified={} | head proposed {}{}",
-            if verified { "verified" } else if degraded { "unverified, mesh degraded" } else { "unverified" },
+            if verified {
+                "verified"
+            } else if degraded {
+                "unverified, mesh degraded"
+            } else {
+                "unverified"
+            },
             mesh.global.omega,
             mesh.intelligence().total,
             priority.value,
             priority.band.as_str(),
             verified,
             proposed.action.as_str(),
-            if overridden { ", overridden by mesh policy" } else { "" }
+            if overridden {
+                ", overridden by mesh policy"
+            } else {
+                ""
+            }
         ),
     }
 }
@@ -570,7 +600,10 @@ pub fn trace_mode(trace: &PipelineTrace) -> ExecutionMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatcher_core::{AgentNode, AgentRole, CapabilityVector, ErrorClass, OmegaRegime, PriorityBand, StageOutcomeReport};
+    use hatcher_core::{
+        AgentNode, AgentRole, CapabilityVector, ErrorClass, OmegaRegime, PriorityBand,
+        StageOutcomeReport,
+    };
 
     use crate::outcomes::ReportedOutcomes;
 
@@ -596,7 +629,11 @@ mod tests {
         let mut mesh = NeuralMesh::default();
         let trace = run(&mut mesh, &task("task-2"));
 
-        let mut agents: Vec<&str> = trace.assignments.iter().map(|a| a.agent_id.as_str()).collect();
+        let mut agents: Vec<&str> = trace
+            .assignments
+            .iter()
+            .map(|a| a.agent_id.as_str())
+            .collect();
         agents.sort_unstable();
         let before = agents.len();
         agents.dedup();
@@ -658,7 +695,11 @@ mod tests {
         run(&mut mesh, &task("task-5"));
 
         for node in &mesh.nodes {
-            assert_eq!(node.telemetry.attempts, 1, "{} should have one attempt", node.id);
+            assert_eq!(
+                node.telemetry.attempts, 1,
+                "{} should have one attempt",
+                node.id
+            );
             assert_eq!(node.telemetry.collaborations, 1);
             assert!(node.telemetry.last_action.is_some());
         }
@@ -679,7 +720,10 @@ mod tests {
         ] {
             assert!((0.0..=1.0).contains(&value), "{name} out of range: {value}");
         }
-        assert!(delta.learning > 0.0, "a run that wrote memories must show learning");
+        assert!(
+            delta.learning > 0.0,
+            "a run that wrote memories must show learning"
+        );
     }
 
     #[test]
@@ -710,8 +754,15 @@ mod tests {
             task.implementation_cost = 0.95;
             run(&mut mesh, &task);
         }
-        assert!(mesh.global.omega < 1.0, "failure must cost the mesh, got {}", mesh.global.omega);
-        assert!(mesh.mean_confidence() < 0.5, "confidence must decay with failure");
+        assert!(
+            mesh.global.omega < 1.0,
+            "failure must cost the mesh, got {}",
+            mesh.global.omega
+        );
+        assert!(
+            mesh.mean_confidence() < 0.5,
+            "confidence must decay with failure"
+        );
     }
 
     #[test]
@@ -781,7 +832,11 @@ mod tests {
         trivial.urgency = 0.0;
 
         let trace = run(&mut mesh, &trivial);
-        assert_eq!(trace.priority.band, PriorityBand::Deferred, "this is low-priority work");
+        assert_eq!(
+            trace.priority.band,
+            PriorityBand::Deferred,
+            "this is low-priority work"
+        );
         assert!(!trace.verified);
         assert_eq!(
             trace.decision.action, "escalate",
@@ -811,13 +866,19 @@ mod tests {
             }
         }
 
-        assert!(verified_runs > 0, "a strong cohort on easy work should verify sometimes");
+        assert!(
+            verified_runs > 0,
+            "a strong cohort on easy work should verify sometimes"
+        );
     }
 
     #[test]
     fn a_prerequisite_failure_poisons_rather_than_stops_the_pipeline() {
         assert_eq!(carry_for(true), 1.0);
-        assert!(carry_for(false) < 1.0, "downstream agents work from a bad plan, not from nothing");
+        assert!(
+            carry_for(false) < 1.0,
+            "downstream agents work from a bad plan, not from nothing"
+        );
     }
 
     #[test]
@@ -854,12 +915,16 @@ mod tests {
             .filter(|record| record.stage.is_staffed() && !record.success)
             .count();
         assert_eq!(staffed_failures, 5);
-        assert!(trace.stages.iter().any(|record| record.note.contains("no agent available")));
+        assert!(trace
+            .stages
+            .iter()
+            .any(|record| record.note.contains("no agent available")));
     }
 
     #[test]
     fn a_single_agent_mesh_doubles_up_rather_than_stalling() {
-        let mut mesh = NeuralMesh::with_cohort(vec![AgentNode::new("solo", "solo", AgentRole::Executor)]);
+        let mut mesh =
+            NeuralMesh::with_cohort(vec![AgentNode::new("solo", "solo", AgentRole::Executor)]);
         let trace = run(&mut mesh, &task("solo-run"));
         assert_eq!(trace.assignments.len(), 5);
         assert!(trace.assignments.iter().all(|a| a.agent_id == "solo"));
@@ -869,7 +934,9 @@ mod tests {
     #[test]
     fn batch_runs_return_one_trace_per_task() {
         let mut mesh = NeuralMesh::default();
-        let tasks: Vec<TaskSpec> = (0..4).map(|index| task(&format!("batch-{index}"))).collect();
+        let tasks: Vec<TaskSpec> = (0..4)
+            .map(|index| task(&format!("batch-{index}")))
+            .collect();
         let traces = run_batch(&mut mesh, &tasks);
 
         assert_eq!(traces.len(), 4);
@@ -916,9 +983,13 @@ mod tests {
                         .with_latency_ms(1_500.0)
                         .with_cost(0.08)
                 } else {
-                    StageOutcomeReport::failure(assignment.stage, &assignment.agent_id, ErrorClass::Quality)
-                        .with_latency_ms(1_500.0)
-                        .with_cost(0.08)
+                    StageOutcomeReport::failure(
+                        assignment.stage,
+                        &assignment.agent_id,
+                        ErrorClass::Quality,
+                    )
+                    .with_latency_ms(1_500.0)
+                    .with_cost(0.08)
                 }
             })
             .collect()
@@ -944,7 +1015,10 @@ mod tests {
         assert!(trace.provenance.is_real());
         assert!(trace.verified);
         assert!((trace.mean_quality() - 0.88).abs() < 1e-9);
-        assert!((trace.total_latency_ms() - 7_500.0).abs() < 1e-9, "five stages at 1.5s each");
+        assert!(
+            (trace.total_latency_ms() - 7_500.0).abs() < 1e-9,
+            "five stages at 1.5s each"
+        );
     }
 
     #[test]
@@ -969,7 +1043,11 @@ mod tests {
                 };
                 report.confidence = record.confidence;
                 report.quality = record.quality;
-                Some(report.with_latency_ms(record.latency_ms).with_cost(record.cost))
+                Some(
+                    report
+                        .with_latency_ms(record.latency_ms)
+                        .with_cost(record.cost),
+                )
             })
             .collect();
 
@@ -981,7 +1059,10 @@ mod tests {
             &RunInputs::new(&source).with_assignments(&planned),
         );
 
-        assert_eq!(reported.verified, simulated.verified, "identical outcomes, identical verdict");
+        assert_eq!(
+            reported.verified, simulated.verified,
+            "identical outcomes, identical verdict"
+        );
         assert_ne!(
             reported.digest, simulated.digest,
             "provenance is inside the commitment, so a rehearsal cannot be passed off as real work"
@@ -1003,13 +1084,24 @@ mod tests {
             })
             .collect();
 
-        run_bound(&mut mesh, &task, &RunInputs::new(&source).with_assignments(&planned));
+        run_bound(
+            &mut mesh,
+            &task,
+            &RunInputs::new(&source).with_assignments(&planned),
+        );
 
         for assignment in &planned {
             let node = mesh.node(&assignment.agent_id).unwrap();
-            assert!(node.resources.is_observed(), "{} learned nothing", assignment.agent_id);
+            assert!(
+                node.resources.is_observed(),
+                "{} learned nothing",
+                assignment.agent_id
+            );
             assert!((node.resources.observed_latency_ms - 12_000.0).abs() < 1e-6);
-            assert!((node.resources.latency - 0.2).abs() < 1e-6, "12s against a 60s ceiling");
+            assert!(
+                (node.resources.latency - 0.2).abs() < 1e-6,
+                "12s against a 60s ceiling"
+            );
         }
     }
 
@@ -1022,7 +1114,11 @@ mod tests {
         let blamed_source: ReportedOutcomes = blamed_plan
             .iter()
             .map(|assignment| {
-                StageOutcomeReport::failure(assignment.stage, &assignment.agent_id, ErrorClass::Quality)
+                StageOutcomeReport::failure(
+                    assignment.stage,
+                    &assignment.agent_id,
+                    ErrorClass::Quality,
+                )
             })
             .collect();
         let blamed_trace = run_bound(
@@ -1036,7 +1132,11 @@ mod tests {
         let unlucky_source: ReportedOutcomes = unlucky_plan
             .iter()
             .map(|assignment| {
-                StageOutcomeReport::failure(assignment.stage, &assignment.agent_id, ErrorClass::Infrastructure)
+                StageOutcomeReport::failure(
+                    assignment.stage,
+                    &assignment.agent_id,
+                    ErrorClass::Infrastructure,
+                )
             })
             .collect();
         let unlucky_trace = run_bound(
@@ -1045,8 +1145,10 @@ mod tests {
             &RunInputs::new(&unlucky_source).with_assignments(&unlucky_plan),
         );
 
-        assert!((blamed_trace.delta.failure - unlucky_trace.delta.failure).abs() < 1e-9,
-            "the mesh failed to deliver either way, so F is the same");
+        assert!(
+            (blamed_trace.delta.failure - unlucky_trace.delta.failure).abs() < 1e-9,
+            "the mesh failed to deliver either way, so F is the same"
+        );
         assert!(
             unlucky.trust.mean_trust() > blamed.trust.mean_trust(),
             "an outage is not a betrayal: unlucky={:.4} blamed={:.4}",
@@ -1069,10 +1171,16 @@ mod tests {
         let source: ReportedOutcomes = planned
             .iter()
             .filter(|assignment| assignment.stage != PipelineStage::Verify)
-            .map(|assignment| StageOutcomeReport::success(assignment.stage, &assignment.agent_id, 0.95))
+            .map(|assignment| {
+                StageOutcomeReport::success(assignment.stage, &assignment.agent_id, 0.95)
+            })
             .collect();
 
-        let trace = run_bound(&mut mesh, &task, &RunInputs::new(&source).with_assignments(&planned));
+        let trace = run_bound(
+            &mut mesh,
+            &task,
+            &RunInputs::new(&source).with_assignments(&planned),
+        );
 
         assert!(!trace.verified, "silence must not read as success");
         assert!(trace.error_classes().contains(&ErrorClass::Unknown));
@@ -1087,11 +1195,17 @@ mod tests {
         let source: ReportedOutcomes = planned
             .iter()
             .filter(|assignment| assignment.stage == PipelineStage::Code)
-            .map(|assignment| StageOutcomeReport::success(assignment.stage, &assignment.agent_id, 0.9))
+            .map(|assignment| {
+                StageOutcomeReport::success(assignment.stage, &assignment.agent_id, 0.9)
+            })
             .collect::<ReportedOutcomes>()
             .simulating_gaps();
 
-        let trace = run_bound(&mut mesh, &task, &RunInputs::new(&source).with_assignments(&planned));
+        let trace = run_bound(
+            &mut mesh,
+            &task,
+            &RunInputs::new(&source).with_assignments(&planned),
+        );
 
         assert_eq!(trace.provenance, OutcomeProvenance::Mixed);
         assert!(
@@ -1112,11 +1226,22 @@ mod tests {
         }
 
         let source = all_reported(&planned, true, 0.8);
-        let trace = run_bound(&mut mesh, &bound, &RunInputs::new(&source).with_assignments(&planned));
+        let trace = run_bound(
+            &mut mesh,
+            &bound,
+            &RunInputs::new(&source).with_assignments(&planned),
+        );
 
-        let used: Vec<&str> = trace.assignments.iter().map(|a| a.agent_id.as_str()).collect();
+        let used: Vec<&str> = trace
+            .assignments
+            .iter()
+            .map(|a| a.agent_id.as_str())
+            .collect();
         let expected: Vec<&str> = planned.iter().map(|a| a.agent_id.as_str()).collect();
-        assert_eq!(used, expected, "the caller already dispatched to these agents");
+        assert_eq!(
+            used, expected,
+            "the caller already dispatched to these agents"
+        );
         assert_eq!(trace.provenance, OutcomeProvenance::Reported);
     }
 

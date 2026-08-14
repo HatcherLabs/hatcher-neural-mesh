@@ -103,13 +103,27 @@ fn normalize(values: &[f64]) -> Vec<f64> {
     if max <= f64::EPSILON {
         return vec![0.0; values.len()];
     }
-    values.iter().map(|value| (value / max).clamp(0.0, 1.0)).collect()
+    values
+        .iter()
+        .map(|value| (value / max).clamp(0.0, 1.0))
+        .collect()
 }
 
 impl Observation {
     /// Read the mesh. `features` is the stimulus used to compute live activation.
-    pub fn capture(mesh: &NeuralMesh, features: &[f64], active: bool, last_trace: Option<PipelineTrace>) -> Self {
-        Self::capture_with(mesh, features, active, last_trace, RuntimeCalibration::default())
+    pub fn capture(
+        mesh: &NeuralMesh,
+        features: &[f64],
+        active: bool,
+        last_trace: Option<PipelineTrace>,
+    ) -> Self {
+        Self::capture_with(
+            mesh,
+            features,
+            active,
+            last_trace,
+            RuntimeCalibration::default(),
+        )
     }
 
     /// Read the mesh against an explicit calibration.
@@ -136,7 +150,8 @@ impl Observation {
             .iter()
             .enumerate()
             .map(|(index, node)| {
-                let (expected_latency_ms, expected_cost) = router::expected_profile(node, &calibration);
+                let (expected_latency_ms, expected_cost) =
+                    router::expected_profile(node, &calibration);
                 AgentView {
                     id: node.id.clone(),
                     label: node.label.clone(),
@@ -204,7 +219,11 @@ impl Observation {
         if self.agents.is_empty() {
             return 0.0;
         }
-        self.agents.iter().map(|agent| agent.expected_cost).sum::<f64>() / self.agents.len() as f64
+        self.agents
+            .iter()
+            .map(|agent| agent.expected_cost)
+            .sum::<f64>()
+            / self.agents.len() as f64
     }
 
     /// Mean expected latency per stage across the cohort, in milliseconds.
@@ -212,7 +231,11 @@ impl Observation {
         if self.agents.is_empty() {
             return 0.0;
         }
-        self.agents.iter().map(|agent| agent.expected_latency_ms).sum::<f64>() / self.agents.len() as f64
+        self.agents
+            .iter()
+            .map(|agent| agent.expected_latency_ms)
+            .sum::<f64>()
+            / self.agents.len() as f64
     }
 
     /// How much of the cohort has been measured rather than merely declared.
@@ -223,7 +246,11 @@ impl Observation {
         if self.agents.is_empty() {
             return 0.0;
         }
-        self.agents.iter().filter(|agent| agent.is_measured()).count() as f64 / self.agents.len() as f64
+        self.agents
+            .iter()
+            .filter(|agent| agent.is_measured())
+            .count() as f64
+            / self.agents.len() as f64
     }
 
     /// Mean activation across the cohort — the mesh's live intensity.
@@ -307,7 +334,10 @@ mod tests {
         let mesh = NeuralMesh::default();
         let observation = Observation::capture(&mesh, &features(), false, None);
 
-        assert!(!observation.agents.is_empty(), "the default cohort must be populated");
+        assert!(
+            !observation.agents.is_empty(),
+            "the default cohort must be populated"
+        );
         assert_eq!(observation.agents.len(), mesh.nodes.len());
         assert!(observation.omega > 0.0);
         assert_eq!(observation.epoch, 0);
@@ -319,8 +349,17 @@ mod tests {
         let observation = Observation::capture(&mesh, &features(), true, None);
 
         for agent in &observation.agents {
-            for value in [agent.capability_norm, agent.activation, agent.trust, agent.confidence] {
-                assert!((0.0..=1.0).contains(&value), "{} out of range: {value}", agent.id);
+            for value in [
+                agent.capability_norm,
+                agent.activation,
+                agent.trust,
+                agent.confidence,
+            ] {
+                assert!(
+                    (0.0..=1.0).contains(&value),
+                    "{} out of range: {value}",
+                    agent.id
+                );
             }
         }
         assert!((0.0..=1.0).contains(&observation.intensity()));
@@ -336,7 +375,10 @@ mod tests {
         let high = Observation::capture(&mesh, &features(), false, None).omega_norm();
 
         assert!(high > low);
-        assert!(high < 1.0, "the curve must leave headroom above any finite omega");
+        assert!(
+            high < 1.0,
+            "the curve must leave headroom above any finite omega"
+        );
     }
 
     #[test]

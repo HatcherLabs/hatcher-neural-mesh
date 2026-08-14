@@ -84,7 +84,14 @@ impl View {
 ///
 /// `time` drives animation and `frame` is the counter shown in the header; both
 /// are passed in rather than read from a clock so a frame is reproducible.
-pub fn draw(canvas: &mut Canvas, view: View, observation: &Observation, camera: &Camera, time: f64, frame: u64) {
+pub fn draw(
+    canvas: &mut Canvas,
+    view: View,
+    observation: &Observation,
+    camera: &Camera,
+    time: f64,
+    frame: u64,
+) {
     canvas.clear();
     let width = canvas.width();
     let height = canvas.height();
@@ -107,7 +114,14 @@ pub fn draw(canvas: &mut Canvas, view: View, observation: &Observation, camera: 
     match view {
         View::Tornado => {
             let rect = Rect::new(0, body_y, width, body_h);
-            canvas.frame(rect.x, rect.y, rect.w, rect.h, "ACTIVE NODE TORNADO", theme::FRAME);
+            canvas.frame(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                "ACTIVE NODE TORNADO",
+                theme::FRAME,
+            );
             let inner = rect.inner();
             let clip = canvas.set_clip(inner.x, inner.y, inner.w, inner.h);
             observation.tornado().draw_fitted(
@@ -119,7 +133,12 @@ pub fn draw(canvas: &mut Canvas, view: View, observation: &Observation, camera: 
             canvas.restore_clip(clip);
         }
         View::Graph => {
-            panels::node_graph(canvas, Rect::new(0, body_y, width, body_h), observation, camera);
+            panels::node_graph(
+                canvas,
+                Rect::new(0, body_y, width, body_h),
+                observation,
+                camera,
+            );
         }
         View::Equations => {
             let half = width / 2;
@@ -205,7 +224,12 @@ pub fn draw(canvas: &mut Canvas, view: View, observation: &Observation, camera: 
             );
             panels::roster(
                 canvas,
-                Rect::new(left_w as i64, body_y + top_h as i64, right_w - graph_w, bottom_h),
+                Rect::new(
+                    left_w as i64,
+                    body_y + top_h as i64,
+                    right_w - graph_w,
+                    bottom_h,
+                ),
                 observation,
             );
             panels::trust_matrix(
@@ -229,7 +253,13 @@ pub fn draw(canvas: &mut Canvas, view: View, observation: &Observation, camera: 
         observation.hubs.len(),
         observation.isolated.len()
     );
-    canvas.text_clipped(1, height as i64 - 1, &footer, theme::LABEL, width.saturating_sub(2));
+    canvas.text_clipped(
+        1,
+        height as i64 - 1,
+        &footer,
+        theme::LABEL,
+        width.saturating_sub(2),
+    );
 }
 
 #[cfg(test)]
@@ -256,8 +286,14 @@ mod tests {
             draw(&mut canvas, view, &observation, &camera, 1.5, 3);
             let plain = canvas.render_plain();
             assert_eq!(plain.lines().count(), 40, "{view:?}");
-            assert!(plain.lines().all(|l| l.chars().count() == 140), "{view:?} overflowed");
-            assert!(plain.chars().any(|c| !c.is_whitespace()), "{view:?} was blank");
+            assert!(
+                plain.lines().all(|l| l.chars().count() == 140),
+                "{view:?} overflowed"
+            );
+            assert!(
+                plain.chars().any(|c| !c.is_whitespace()),
+                "{view:?} was blank"
+            );
             assert!(plain.contains(view.as_str()), "{view:?} footer missing");
         }
     }
@@ -270,8 +306,14 @@ mod tests {
         draw(&mut canvas, View::Contract, &observation, &camera, 0.0, 0);
 
         let strip = canvas.render_plain().lines().nth(1).unwrap().to_string();
-        assert!(strip.contains("[contract]"), "the active tab is bracketed: {strip:?}");
-        assert!(strip.contains(" benchmark "), "and the others are still listed");
+        assert!(
+            strip.contains("[contract]"),
+            "the active tab is bracketed: {strip:?}"
+        );
+        assert!(
+            strip.contains(" benchmark "),
+            "and the others are still listed"
+        );
         assert!(strip.contains(" dashboard "));
     }
 
@@ -284,7 +326,10 @@ mod tests {
         let plain = canvas.render_plain();
 
         assert!(plain.contains("simulated"), "a rehearsing mesh must say so");
-        assert!(plain.contains("0% of cohort"), "and admit nothing has been measured");
+        assert!(
+            plain.contains("0% of cohort"),
+            "and admit nothing has been measured"
+        );
         assert!(plain.contains("THE FOUR VERBS"));
     }
 
@@ -305,7 +350,10 @@ mod tests {
         draw(&mut canvas, View::Economics, &observation, &camera, 0.0, 0);
         let plain = canvas.render_plain();
 
-        assert!(plain.contains("declared"), "an unmeasured cohort must not look measured");
+        assert!(
+            plain.contains("declared"),
+            "an unmeasured cohort must not look measured"
+        );
         assert!(plain.contains("COST & LATENCY"));
     }
 

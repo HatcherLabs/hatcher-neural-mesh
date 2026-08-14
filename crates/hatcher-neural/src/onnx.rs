@@ -139,11 +139,15 @@ impl InferenceBackend for OnnxBackend {
         // the only precision loss in the path, and it is bounded by the fact that every
         // input slot is already a normalized statistic in [0, 1].
         let values: Vec<f32> = input.iter().map(|value| *value as f32).collect();
-        let tensor: Tensor = tract_ndarray::Array2::from_shape_vec((1, self.spec.input_dim), values)
-            .map_err(runtime_error)?
-            .into();
+        let tensor: Tensor =
+            tract_ndarray::Array2::from_shape_vec((1, self.spec.input_dim), values)
+                .map_err(runtime_error)?
+                .into();
 
-        let outputs = self.model.run(tvec!(tensor.into())).map_err(runtime_error)?;
+        let outputs = self
+            .model
+            .run(tvec!(tensor.into()))
+            .map_err(runtime_error)?;
         let first = outputs.first().ok_or_else(|| InferenceError::Runtime {
             detail: "model produced no outputs".to_string(),
         })?;
@@ -186,7 +190,9 @@ mod tests {
             match fixture() {
                 Some(path) => path,
                 None => {
-                    eprintln!("skipping: `{FIXTURE}` ships with the repository, not the published crate");
+                    eprintln!(
+                        "skipping: `{FIXTURE}` ships with the repository, not the published crate"
+                    );
                     return;
                 }
             }
@@ -195,7 +201,10 @@ mod tests {
 
     fn backend() -> Option<OnnxBackend> {
         let path = fixture()?;
-        Some(OnnxBackend::load(&path, ModelSpec::native_default()).expect("fixture model should load"))
+        Some(
+            OnnxBackend::load(&path, ModelSpec::native_default())
+                .expect("fixture model should load"),
+        )
     }
 
     #[test]
@@ -206,7 +215,9 @@ mod tests {
         assert_eq!(backend.spec().input_dim, 8);
         assert!(backend.path().ends_with(".onnx"));
 
-        let output = backend.forward(&[0.5, 0.3, 0.8, 0.9, 0.3, 0.1, 0.2, 0.1]).unwrap();
+        let output = backend
+            .forward(&[0.5, 0.3, 0.8, 0.9, 0.3, 0.1, 0.2, 0.1])
+            .unwrap();
         assert_eq!(output.len(), 4);
         assert!(output.iter().all(|value| value.is_finite()));
     }
@@ -247,12 +258,18 @@ mod tests {
         let _ = fixture_or_skip!();
         let features = [0.3, 0.4, 0.5, 0.6, 0.5, 0.4, 0.3, 0.2];
         let backend = backend().expect("fixture checked above");
-        assert_eq!(backend.forward(&features).unwrap(), backend.forward(&features).unwrap());
+        assert_eq!(
+            backend.forward(&features).unwrap(),
+            backend.forward(&features).unwrap()
+        );
     }
 
     #[test]
     fn a_missing_model_is_reported_not_guessed_at() {
-        let error = OnnxBackend::load("models/fixtures/does-not-exist.onnx", ModelSpec::native_default());
+        let error = OnnxBackend::load(
+            "models/fixtures/does-not-exist.onnx",
+            ModelSpec::native_default(),
+        );
         assert!(matches!(error, Err(InferenceError::ModelNotFound { .. })));
     }
 
@@ -270,15 +287,23 @@ mod tests {
         // The fixture is an 8-wide model; binding it to a 4-wide contract must fail.
         let fixture = fixture_or_skip!();
         let error = OnnxBackend::load(&fixture, ModelSpec::new("mismatch", "1.0.0", 4, 6, 4));
-        assert!(error.is_err(), "shape mismatches must not be discovered in production");
+        assert!(
+            error.is_err(),
+            "shape mismatches must not be discovered in production"
+        );
     }
 
     #[test]
     fn wrong_width_input_is_rejected_at_call_time() {
         let _ = fixture_or_skip!();
         assert_eq!(
-            backend().expect("fixture checked above").forward(&[0.1, 0.2]),
-            Err(InferenceError::InputShape { expected: 8, actual: 2 })
+            backend()
+                .expect("fixture checked above")
+                .forward(&[0.1, 0.2]),
+            Err(InferenceError::InputShape {
+                expected: 8,
+                actual: 2
+            })
         );
     }
 
@@ -327,7 +352,9 @@ mod tests {
     #[test]
     fn backend_kind_resolves_onnx_when_the_feature_is_on() {
         let fixture = fixture_or_skip!();
-        let kind = BackendKind::Onnx { model_path: fixture };
+        let kind = BackendKind::Onnx {
+            model_path: fixture,
+        };
         let backend = kind.resolve(ModelSpec::native_default()).unwrap();
         assert!(backend.name().starts_with("onnx:"));
 
@@ -337,7 +364,11 @@ mod tests {
             },
             ModelSpec::native_default(),
         );
-        assert_eq!(fallback.name(), "native", "a bad path degrades rather than dying");
+        assert_eq!(
+            fallback.name(),
+            "native",
+            "a bad path degrades rather than dying"
+        );
         assert!(error.is_some());
     }
 
