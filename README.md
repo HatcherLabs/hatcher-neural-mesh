@@ -295,6 +295,7 @@ The integration contract is served alongside it:
 | finalize | `POST /api/runs/{id}/finalize` |
 | inspect / abandon | `GET /api/runs`, `GET /api/runs/{id}`, `DELETE /api/runs/{id}` |
 | evidence | `GET /api/benchmark`, `POST /api/replay` |
+| tenant-local shadow rank | `POST /api/shadow/route` |
 
 ```bash
 HATCHER_MESH_PORT=3030 cargo run -p hatcher-ux -- serve
@@ -304,6 +305,12 @@ The frontend's own backend stays at `:3001`; this listens on `HATCHER_MESH_PORT`
 (default `3030`). Set `HATCHER_MESH_ALLOWED_ORIGIN` to lock CORS down before exposing it
 past localhost. Coefficient writes are validated, so a bad tuning gets a `400` instead of
 quietly making the mesh diverge.
+
+Hatcher's shadow adapter uses the stateless `/api/shadow/route` surface. Every request
+supplies one owner's complete candidate cohort, builds an empty request-local mesh, and
+returns a recommendation without changing shared state. Keep this sidecar private to the
+Hatcher API host and set `HATCHER_MESH_INTERNAL_TOKEN` when the process boundary is not
+otherwise isolated.
 
 ## ONNX decision heads
 

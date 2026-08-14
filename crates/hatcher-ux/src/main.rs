@@ -27,13 +27,13 @@ use std::thread;
 use std::time::Duration;
 
 use hatcher_core::{
-    AgentRegistration, AgentRole, ApiRequest, ApiResponse, ContractError, ExecutionMode,
-    HatcherRequest, MeshCoefficients, PipelineTrace, StageOutcomeReport, TaskEnvelope, TaskResult,
-    TaskSubmission, CONTRACT_VERSION,
+    AgentRegistration, AgentRole, ApiRequest, ApiResponse, Assignment, ContractError,
+    ExecutionMode, HatcherRequest, MeshCoefficients, PipelineStage, PipelineTrace,
+    StageOutcomeReport, TaskEnvelope, TaskResult, TaskSubmission, CONTRACT_VERSION,
 };
-use hatcher_neural::{pipeline, MeshAdapter};
+use hatcher_neural::{pipeline, router, MeshAdapter};
 use hatcher_playground::{AgentArena, AgentBattle, Benchmark, Replay, Scenario};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::runtime::Runtime;
 use warp::http::StatusCode;
@@ -141,6 +141,123 @@ struct TraceSummary {
     stages_failed: usize,
     total_cost: f64,
     digest: String,
+}
+
+/// Stateless, tenant-local routing request used by the Hatcher control plane in shadow
+/// mode. The cohort exists only for this request, so agents from different owners can
+/// never enter the same candidate pool.
+#[derive(Debug, Clone, Deserialize)]
+struct ShadowRouteRequest {
+    agents: Vec<AgentRegistration>,
+    task: TaskEnvelope,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ShadowCandidate {
+    agent_id: String,
+    score: f64,
+    capability: f64,
+    inbound_trust: f64,
+    mastery: f64,
+    expected_latency_ms: f64,
+    expected_cost: f64,
+    within_constraints: bool,
+}
+
+impl ShadowCandidate {
+    fn from_assignment(
+        assignment: Assignment,
+        adapter: &MeshAdapter,
+        task: &hatcher_core::TaskSpec,
+    ) -> Self {
+        let node = adapter
+            .mesh
+            .node(&assignment.agent_id)
+            .expect("ranked assignments always refer to a registered node");
+        let (expected_latency_ms, expected_cost) =
+            router::expected_profile(node, &adapter.calibration);
+        Self {
+            agent_id: assignment.agent_id,
+            score: assignment.score,
+            capability: assignment.capability,
+            inbound_trust: assignment.inbound_trust,
+            mastery: assignment.mastery,
+            expected_latency_ms,
+            expected_cost,
+            within_constraints: task.constraints.admits(expected_latency_ms, expected_cost),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ShadowRouteResponse {
+    contract_version: &'static str,
+    recommended_agent_id: Option<String>,
+    confidence: f64,
+    domain: String,
+    band: String,
+    mesh_digest: String,
+    candidates: Vec<ShadowCandidate>,
+}
+
+fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse, ContractError> {
+    if request.agents.is_empty() {
+        return Err(ContractError::invalid(
+            "agents",
+            "at least one tenant-owned agent is required",
+        ));
+    }
+    request.task.validate()?;
+
+    let mut adapter = MeshAdapter::empty();
+    for registration in request.agents {
+        adapter.register_agent(registration)?;
+    }
+
+    let task = request.task.to_task(1);
+    let band = adapter.mesh.priority_for(&task).band;
+    let ranked = router::rank_with(
+        &adapter.mesh,
+        PipelineStage::Code,
+        &task,
+        band,
+        &[],
+        &adapter.calibration,
+    );
+    let confidence = match ranked.as_slice() {
+        [] => 0.0,
+        [_] => 1.0,
+        [first, second, ..] => {
+            let denominator = first.score + second.score;
+            if denominator <= f64::EPSILON {
+                0.5
+            } else {
+                (first.score / denominator).clamp(0.5, 1.0)
+            }
+        }
+    };
+    let recommended_agent_id = ranked.first().map(|candidate| candidate.agent_id.clone());
+    let candidates = ranked
+        .into_iter()
+        .map(|assignment| ShadowCandidate::from_assignment(assignment, &adapter, &task))
+        .collect();
+
+    Ok(ShadowRouteResponse {
+        contract_version: CONTRACT_VERSION,
+        recommended_agent_id,
+        confidence,
+        domain: task.domain,
+        band: band.as_str().to_string(),
+        mesh_digest: adapter.mesh.digest(),
+        candidates,
+    })
+}
+
+fn internal_token_allows(provided: Option<&str>) -> bool {
+    match env::var("HATCHER_MESH_INTERNAL_TOKEN") {
+        Ok(expected) if !expected.is_empty() => provided == Some(expected.as_str()),
+        _ => true,
+    }
 }
 
 impl From<&PipelineTrace> for TraceSummary {
@@ -412,6 +529,27 @@ fn routes(
             }))
         });
 
+    // Shadow routing is deliberately stateless and tenant-local. Hatcher supplies only
+    // the current owner's eligible cohort, receives a ranked recommendation, and keeps
+    // executing through its existing task runner. The route never mutates the live demo
+    // session and cannot learn from its own recommendation.
+    let shadow_route = warp::path!("api" / "shadow" / "route")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("x-hatcher-mesh-token"))
+        .and(warp::body::content_length_limit(256 * 1024))
+        .and(warp::body::json())
+        .map(
+            |token: Option<String>, request: ShadowRouteRequest| -> Box<dyn warp::Reply> {
+                if !internal_token_allows(token.as_deref()) {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&json!({ "error": "unauthorized" })),
+                        StatusCode::UNAUTHORIZED,
+                    ));
+                }
+                contract_result(build_shadow_route(request))
+            },
+        );
+
     let register_agent = warp::path!("api" / "mesh" / "agents")
         .and(warp::post())
         .and(warp::body::json())
@@ -550,6 +688,7 @@ fn routes(
         .boxed();
 
     let contract_surface = contract
+        .or(shadow_route)
         .or(register_agent)
         // The two-segment run routes come before the one-segment ones: warp matches in
         // order, and `/api/runs/{id}` would otherwise swallow `/api/runs/{id}/finalize`.
@@ -581,6 +720,7 @@ async fn serve_http(state: AppState, port: u16) {
     println!("  GET  /api/battle | /api/benchmark    POST /api/replay");
     println!("  -- integration contract v{CONTRACT_VERSION} --");
     println!("  GET  /api/contract");
+    println!("  POST /api/shadow/route                        rank one tenant-local cohort");
     println!("  POST /api/mesh/agents                          register an agent");
     println!("  POST /api/runs                                 plan a run");
     println!("  POST /api/runs/{{id}}/outcomes                   report what happened");
@@ -1156,6 +1296,37 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shadow_routing_ranks_only_the_supplied_tenant_cohort() {
+        let strong = AgentRegistration::new("strong", "Strong coder", AgentRole::Coder)
+            .with_capability(hatcher_core::CapabilityVector::uniform(0.9))
+            .with_expertise("rust", 0.95);
+        let steady = AgentRegistration::new("steady", "Steady coder", AgentRole::Coder)
+            .with_capability(hatcher_core::CapabilityVector::uniform(0.6))
+            .with_expertise("rust", 0.60);
+        let response = build_shadow_route(ShadowRouteRequest {
+            agents: vec![steady, strong],
+            task: TaskEnvelope::new("review the Rust adapter").with_domain("rust"),
+        })
+        .expect("valid cohort should route");
+
+        assert_eq!(response.recommended_agent_id.as_deref(), Some("strong"));
+        assert_eq!(response.candidates.len(), 2);
+        assert!(response.confidence >= 0.5);
+        assert_eq!(response.domain, "rust");
+    }
+
+    #[test]
+    fn shadow_routing_rejects_an_empty_cohort() {
+        let error = build_shadow_route(ShadowRouteRequest {
+            agents: Vec::new(),
+            task: TaskEnvelope::new("nothing can run this"),
+        })
+        .expect_err("an empty tenant must not fall back to another cohort");
+
+        assert_eq!(error.status(), 400);
+    }
 
     #[test]
     fn telemetry_render_contains_the_live_numbers() {
