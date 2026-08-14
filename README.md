@@ -309,8 +309,37 @@ quietly making the mesh diverge.
 Hatcher's shadow adapter uses the stateless `/api/shadow/route` surface. Every request
 supplies one owner's complete candidate cohort, builds an empty request-local mesh, and
 returns a recommendation without changing shared state. Keep this sidecar private to the
-Hatcher API host and set `HATCHER_MESH_INTERNAL_TOKEN` when the process boundary is not
-otherwise isolated.
+Hatcher API host. The endpoint rejects cohorts larger than 128 agents and caps request
+bodies at 256 KiB.
+
+### Production shadow sidecar
+
+Production must use the restricted surface and fail-closed token policy:
+
+```dotenv
+HATCHER_MESH_PORT=3030
+HATCHER_MESH_BIND_ADDR=0.0.0.0
+HATCHER_MESH_ALLOW_NON_LOOPBACK_BIND=true
+HATCHER_MESH_INTERNAL_TOKEN=<at-least-32-random-characters>
+HATCHER_MESH_REQUIRE_INTERNAL_TOKEN=true
+HATCHER_MESH_SHADOW_ONLY=true
+```
+
+Keep those values in `/etc/hatcher/services/hatcher-neural-mesh.env`, owned by root with
+mode `0600`. `scripts/deploy-production.sh` builds the pinned Docker image, installs the
+systemd unit, binds the process only to `127.0.0.1`, enforces resource and privilege
+limits, waits for `/health`, and restores the previous image if the health gate fails.
+
+```bash
+sudo install -d -o root -g root -m 0750 /etc/hatcher/services
+sudo install -o root -g root -m 0600 .env.production.mesh \
+  /etc/hatcher/services/hatcher-neural-mesh.env
+./scripts/deploy-production.sh
+```
+
+The Hatcher API receives the same secret through `HATCHER_NEURAL_MESH_TOKEN`. Do not put
+the sidecar behind the public reverse proxy. In shadow-only mode, every demo/stateful
+endpoint is removed; only `/health`, `/api/contract`, and `/api/shadow/route` remain.
 
 ## ONNX decision heads
 

@@ -27,3 +27,11 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --all-features --locked
+      - name: Restricted sidecar smoke
+        run: |
+          cargo build --locked -p hatcher-ux
+          scripts/smoke-shadow-sidecar.sh target/debug/hatcher-ux
+      - name: Production script syntax
+        run: bash -n scripts/deploy-production.sh scripts/smoke-shadow-sidecar.sh
+      - name: Production container
+        run: docker build --tag hatcher-neural-mesh-ci .

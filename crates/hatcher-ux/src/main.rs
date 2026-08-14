@@ -22,6 +22,7 @@
 
 use std::env;
 use std::io::{self, Write};
+use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -36,14 +37,25 @@ use hatcher_playground::{AgentArena, AgentBattle, Benchmark, Replay, Scenario};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::runtime::Runtime;
+use warp::filters::BoxedFilter;
 use warp::http::StatusCode;
+use warp::reject::Reject;
 use warp::Filter;
+use warp::Reply;
 
 /// How many pipeline traces the Logs view keeps.
 const TRACE_LOG_CAPACITY: usize = 200;
 
 /// Default port for the mesh sidecar.
 const DEFAULT_PORT: u16 = 3030;
+
+/// Keep a compromised or misconfigured caller from turning one request into an
+/// unbounded ranking job. Hatcher workspaces are far smaller than this today.
+const MAX_SHADOW_AGENTS: usize = 128;
+
+/// Version the narrow Hatcher shadow envelope independently from the full
+/// register/plan/report/finalize integration contract.
+const SHADOW_CONTRACT_VERSION: &str = "shadow.v1";
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -207,6 +219,12 @@ fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse
             "at least one tenant-owned agent is required",
         ));
     }
+    if request.agents.len() > MAX_SHADOW_AGENTS {
+        return Err(ContractError::invalid(
+            "agents",
+            format!("at most {MAX_SHADOW_AGENTS} tenant-owned agents are allowed"),
+        ));
+    }
     request.task.validate()?;
 
     let mut adapter = MeshAdapter::empty();
@@ -243,7 +261,7 @@ fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse
         .collect();
 
     Ok(ShadowRouteResponse {
-        contract_version: CONTRACT_VERSION,
+        contract_version: SHADOW_CONTRACT_VERSION,
         recommended_agent_id,
         confidence,
         domain: task.domain,
@@ -253,11 +271,98 @@ fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse
     })
 }
 
-fn internal_token_allows(provided: Option<&str>) -> bool {
-    match env::var("HATCHER_MESH_INTERNAL_TOKEN") {
-        Ok(expected) if !expected.is_empty() => provided == Some(expected.as_str()),
-        _ => true,
+fn env_flag(name: &str) -> bool {
+    matches!(
+        env::var(name).as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = left.len() ^ right.len();
+    let length = left.len().max(right.len());
+    for index in 0..length {
+        difference |= usize::from(left.get(index).copied().unwrap_or_default())
+            ^ usize::from(right.get(index).copied().unwrap_or_default());
     }
+    difference == 0
+}
+
+fn token_policy_allows(expected: Option<&str>, required: bool, provided: Option<&str>) -> bool {
+    match expected.filter(|token| !token.is_empty()) {
+        Some(expected) => provided
+            .map(|provided| constant_time_equal(expected.as_bytes(), provided.as_bytes()))
+            .unwrap_or(false),
+        None => !required,
+    }
+}
+
+fn internal_token_allows(provided: Option<&str>) -> bool {
+    let expected = env::var("HATCHER_MESH_INTERNAL_TOKEN").ok();
+    token_policy_allows(
+        expected.as_deref(),
+        env_flag("HATCHER_MESH_REQUIRE_INTERNAL_TOKEN"),
+        provided,
+    )
+}
+
+fn mesh_bind_addr() -> Result<Ipv4Addr, String> {
+    env::var("HATCHER_MESH_BIND_ADDR")
+        .unwrap_or_else(|_| Ipv4Addr::LOCALHOST.to_string())
+        .parse::<Ipv4Addr>()
+        .map_err(|_| "HATCHER_MESH_BIND_ADDR must be a valid IPv4 address".to_string())
+}
+
+fn bind_policy_allows(address: Ipv4Addr, non_loopback_allowed: bool) -> bool {
+    address.is_loopback() || non_loopback_allowed
+}
+
+fn validate_serve_configuration() -> Result<(), String> {
+    if env_flag("HATCHER_MESH_REQUIRE_INTERNAL_TOKEN")
+        && env::var("HATCHER_MESH_INTERNAL_TOKEN")
+            .map(|token| token.trim().len() < 32)
+            .unwrap_or(true)
+    {
+        return Err(
+            "HATCHER_MESH_INTERNAL_TOKEN must contain at least 32 characters when token enforcement is enabled"
+                .to_string(),
+        );
+    }
+    let bind_address = mesh_bind_addr()?;
+    if !bind_policy_allows(
+        bind_address,
+        env_flag("HATCHER_MESH_ALLOW_NON_LOOPBACK_BIND"),
+    ) {
+        return Err(
+            "non-loopback binding requires HATCHER_MESH_ALLOW_NON_LOOPBACK_BIND=true".to_string(),
+        );
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct UnauthorizedShadowRequest;
+
+impl Reject for UnauthorizedShadowRequest {}
+
+async fn require_shadow_token(token: Option<String>) -> Result<(), warp::Rejection> {
+    if internal_token_allows(token.as_deref()) {
+        Ok(())
+    } else {
+        Err(warp::reject::custom(UnauthorizedShadowRequest))
+    }
+}
+
+async fn recover_shadow_authentication(
+    rejection: warp::Rejection,
+) -> Result<Box<dyn Reply>, warp::Rejection> {
+    if rejection.find::<UnauthorizedShadowRequest>().is_some() {
+        return Ok(Box::new(warp::reply::with_status(
+            warp::reply::json(&json!({ "error": "unauthorized" })),
+            StatusCode::UNAUTHORIZED,
+        )));
+    }
+    Err(rejection)
 }
 
 impl From<&PipelineTrace> for TraceSummary {
@@ -288,9 +393,7 @@ fn with_state(
     warp::any().map(move || state.clone())
 }
 
-fn routes(
-    state: AppState,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+fn routes(state: AppState, shadow_only: bool) -> BoxedFilter<(warp::reply::Response,)> {
     let health = warp::path!("health")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -536,19 +639,18 @@ fn routes(
     let shadow_route = warp::path!("api" / "shadow" / "route")
         .and(warp::post())
         .and(warp::header::optional::<String>("x-hatcher-mesh-token"))
+        .and_then(require_shadow_token)
         .and(warp::body::content_length_limit(256 * 1024))
         .and(warp::body::json())
-        .map(
-            |token: Option<String>, request: ShadowRouteRequest| -> Box<dyn warp::Reply> {
-                if !internal_token_allows(token.as_deref()) {
-                    return Box::new(warp::reply::with_status(
-                        warp::reply::json(&json!({ "error": "unauthorized" })),
-                        StatusCode::UNAUTHORIZED,
-                    ));
-                }
-                contract_result(build_shadow_route(request))
-            },
-        );
+        .map(|_: (), request: ShadowRouteRequest| contract_result(build_shadow_route(request)))
+        .recover(recover_shadow_authentication);
+
+    let production_surface = health
+        .clone()
+        .or(contract.clone())
+        .or(shadow_route)
+        .map(Reply::into_response)
+        .boxed();
 
     let register_agent = warp::path!("api" / "mesh" / "agents")
         .and(warp::post())
@@ -700,7 +802,16 @@ fn routes(
         .or(cancel_run)
         .boxed();
 
-    read_models.or(tasks).or(contract_surface).with(cors)
+    if shadow_only {
+        production_surface
+    } else {
+        read_models
+            .or(tasks)
+            .or(contract_surface)
+            .with(cors)
+            .map(Reply::into_response)
+            .boxed()
+    }
 }
 
 fn mesh_port() -> u16 {
@@ -711,7 +822,13 @@ fn mesh_port() -> u16 {
 }
 
 async fn serve_http(state: AppState, port: u16) {
-    println!("mesh API listening on http://127.0.0.1:{port}");
+    if let Err(error) = validate_serve_configuration() {
+        eprintln!("refusing to start mesh API: {error}");
+        std::process::exit(78);
+    }
+    let shadow_only = env_flag("HATCHER_MESH_SHADOW_ONLY");
+    let bind_address = mesh_bind_addr().expect("serve configuration was already validated");
+    println!("mesh API listening on http://{bind_address}:{port}");
     println!("  GET  /health");
     println!("  GET  /api/mesh/overview | analytics | graph | trust | agents | logs | memory");
     println!("  GET  /api/mesh/config     PUT /api/mesh/config");
@@ -726,7 +843,12 @@ async fn serve_http(state: AppState, port: u16) {
     println!("  POST /api/runs/{{id}}/outcomes                   report what happened");
     println!("  POST /api/runs/{{id}}/finalize                   receive the decision");
     println!("  GET  /api/runs | /api/runs/{{id}}   DELETE /api/runs/{{id}}");
-    warp::serve(routes(state)).run(([127, 0, 0, 1], port)).await;
+    if shadow_only {
+        println!("  production surface: health, contract, and shadow routing only");
+    }
+    warp::serve(routes(state, shadow_only))
+        .run((bind_address.octets(), port))
+        .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1288,6 +1410,16 @@ fn main() {
                 "  HATCHER_MESH_PORT           listen port for `serve` (default {DEFAULT_PORT})"
             );
             println!("  HATCHER_MESH_ALLOWED_ORIGIN CORS origin (default: any)");
+            println!("  HATCHER_MESH_BIND_ADDR      listen address (default: 127.0.0.1)");
+            println!(
+                "  HATCHER_MESH_ALLOW_NON_LOOPBACK_BIND explicit opt-in for container binding"
+            );
+            println!(
+                "  HATCHER_MESH_SHADOW_ONLY    expose only health, contract, and shadow routing"
+            );
+            println!(
+                "  HATCHER_MESH_REQUIRE_INTERNAL_TOKEN require a >=32 character routing token"
+            );
         }
         _ => interactive_cli(state),
     }
@@ -1312,6 +1444,7 @@ mod tests {
         .expect("valid cohort should route");
 
         assert_eq!(response.recommended_agent_id.as_deref(), Some("strong"));
+        assert_eq!(response.contract_version, SHADOW_CONTRACT_VERSION);
         assert_eq!(response.candidates.len(), 2);
         assert!(response.confidence >= 0.5);
         assert_eq!(response.domain, "rust");
@@ -1326,6 +1459,43 @@ mod tests {
         .expect_err("an empty tenant must not fall back to another cohort");
 
         assert_eq!(error.status(), 400);
+    }
+
+    #[test]
+    fn shadow_routing_caps_the_tenant_cohort() {
+        let agents = (0..=MAX_SHADOW_AGENTS)
+            .map(|index| {
+                AgentRegistration::new(
+                    format!("agent-{index}"),
+                    format!("Agent {index}"),
+                    AgentRole::Coder,
+                )
+            })
+            .collect();
+        let error = build_shadow_route(ShadowRouteRequest {
+            agents,
+            task: TaskEnvelope::new("too many candidates"),
+        })
+        .expect_err("oversized cohorts must be rejected before ranking");
+
+        assert_eq!(error.status(), 400);
+    }
+
+    #[test]
+    fn production_token_policy_fails_closed() {
+        let token = "0123456789abcdef0123456789abcdef";
+        assert!(token_policy_allows(Some(token), true, Some(token)));
+        assert!(!token_policy_allows(Some(token), true, None));
+        assert!(!token_policy_allows(Some(token), true, Some("wrong")));
+        assert!(!token_policy_allows(None, true, Some(token)));
+        assert!(token_policy_allows(None, false, None));
+    }
+
+    #[test]
+    fn non_loopback_binding_requires_explicit_opt_in() {
+        assert!(bind_policy_allows(Ipv4Addr::LOCALHOST, false));
+        assert!(!bind_policy_allows(Ipv4Addr::UNSPECIFIED, false));
+        assert!(bind_policy_allows(Ipv4Addr::UNSPECIFIED, true));
     }
 
     #[test]
