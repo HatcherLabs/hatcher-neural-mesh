@@ -8,8 +8,9 @@ Requires=docker.service
 Type=simple
 User=deploy
 Group=deploy
+LoadCredential=mesh-env:@@ENV_FILE@@
 ExecStartPre=-/usr/bin/docker rm -f hatcher-neural-mesh
-ExecStart=/usr/bin/docker run --rm --name hatcher-neural-mesh --publish 127.0.0.1:3030:3030 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges --memory 512m --cpus 1 --pids-limit 128 --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 --env-file @@ENV_FILE@@ @@IMAGE@@
+ExecStart=/usr/bin/docker run --rm --name hatcher-neural-mesh --publish 127.0.0.1:3030:3030 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges --memory 512m --cpus 1 --pids-limit 128 --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 --env-file %d/mesh-env @@IMAGE@@
 ExecStop=/usr/bin/docker stop --time 20 hatcher-neural-mesh
 Restart=on-failure
 RestartSec=3s
