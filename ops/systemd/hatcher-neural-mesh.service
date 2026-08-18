@@ -1,5 +1,5 @@
 [Unit]
-Description=Hatcher Neural Mesh private shadow-routing sidecar
+Description=Hatcher Neural Mesh private routing sidecar
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 Requires=docker.service
