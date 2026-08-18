@@ -53,9 +53,11 @@ const DEFAULT_PORT: u16 = 3030;
 /// unbounded ranking job. Hatcher workspaces are far smaller than this today.
 const MAX_SHADOW_AGENTS: usize = 128;
 
-/// Version the narrow Hatcher shadow envelope independently from the full
-/// register/plan/report/finalize integration contract.
+/// Version the narrow Hatcher routing envelopes independently from the full
+/// register/plan/report/finalize integration contract. `shadow.v1` remains
+/// available during the migration; Hatcher Live Mode uses `route.v2`.
 const SHADOW_CONTRACT_VERSION: &str = "shadow.v1";
+const ROUTING_CONTRACT_VERSION: &str = "route.v2";
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -212,7 +214,10 @@ struct ShadowRouteResponse {
     candidates: Vec<ShadowCandidate>,
 }
 
-fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse, ContractError> {
+fn build_route(
+    request: ShadowRouteRequest,
+    contract_version: &'static str,
+) -> Result<ShadowRouteResponse, ContractError> {
     if request.agents.is_empty() {
         return Err(ContractError::invalid(
             "agents",
@@ -261,7 +266,7 @@ fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse
         .collect();
 
     Ok(ShadowRouteResponse {
-        contract_version: SHADOW_CONTRACT_VERSION,
+        contract_version,
         recommended_agent_id,
         confidence,
         domain: task.domain,
@@ -269,6 +274,14 @@ fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse
         mesh_digest: adapter.mesh.digest(),
         candidates,
     })
+}
+
+fn build_shadow_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse, ContractError> {
+    build_route(request, SHADOW_CONTRACT_VERSION)
+}
+
+fn build_live_route(request: ShadowRouteRequest) -> Result<ShadowRouteResponse, ContractError> {
+    build_route(request, ROUTING_CONTRACT_VERSION)
 }
 
 fn env_flag(name: &str) -> bool {
@@ -632,10 +645,9 @@ fn routes(state: AppState, shadow_only: bool) -> BoxedFilter<(warp::reply::Respo
             }))
         });
 
-    // Shadow routing is deliberately stateless and tenant-local. Hatcher supplies only
-    // the current owner's eligible cohort, receives a ranked recommendation, and keeps
-    // executing through its existing task runner. The route never mutates the live demo
-    // session and cannot learn from its own recommendation.
+    // Routing is deliberately stateless and tenant-local. Hatcher supplies only the
+    // current owner's eligible cohort and remains the sole execution authority. The
+    // sidecar ranks; Hatcher decides whether a recommendation is shadowed or applied.
     let shadow_route = warp::path!("api" / "shadow" / "route")
         .and(warp::post())
         .and(warp::header::optional::<String>("x-hatcher-mesh-token"))
@@ -645,10 +657,20 @@ fn routes(state: AppState, shadow_only: bool) -> BoxedFilter<(warp::reply::Respo
         .map(|_: (), request: ShadowRouteRequest| contract_result(build_shadow_route(request)))
         .recover(recover_shadow_authentication);
 
+    let live_route = warp::path!("api" / "route")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("x-hatcher-mesh-token"))
+        .and_then(require_shadow_token)
+        .and(warp::body::content_length_limit(256 * 1024))
+        .and(warp::body::json())
+        .map(|_: (), request: ShadowRouteRequest| contract_result(build_live_route(request)))
+        .recover(recover_shadow_authentication);
+
     let production_surface = health
         .clone()
         .or(contract.clone())
         .or(shadow_route)
+        .or(live_route)
         .map(Reply::into_response)
         .boxed();
 
@@ -791,6 +813,7 @@ fn routes(state: AppState, shadow_only: bool) -> BoxedFilter<(warp::reply::Respo
 
     let contract_surface = contract
         .or(shadow_route)
+        .or(live_route)
         .or(register_agent)
         // The two-segment run routes come before the one-segment ones: warp matches in
         // order, and `/api/runs/{id}` would otherwise swallow `/api/runs/{id}/finalize`.
@@ -838,6 +861,7 @@ async fn serve_http(state: AppState, port: u16) {
     println!("  -- integration contract v{CONTRACT_VERSION} --");
     println!("  GET  /api/contract");
     println!("  POST /api/shadow/route                        rank one tenant-local cohort");
+    println!("  POST /api/route                               rank for Hatcher Live Mode");
     println!("  POST /api/mesh/agents                          register an agent");
     println!("  POST /api/runs                                 plan a run");
     println!("  POST /api/runs/{{id}}/outcomes                   report what happened");
@@ -1415,7 +1439,7 @@ fn main() {
                 "  HATCHER_MESH_ALLOW_NON_LOOPBACK_BIND explicit opt-in for container binding"
             );
             println!(
-                "  HATCHER_MESH_SHADOW_ONLY    expose only health, contract, and shadow routing"
+                "  HATCHER_MESH_SHADOW_ONLY    expose only health, contract, and stateless routing"
             );
             println!(
                 "  HATCHER_MESH_REQUIRE_INTERNAL_TOKEN require a >=32 character routing token"
@@ -1459,6 +1483,22 @@ mod tests {
         .expect_err("an empty tenant must not fall back to another cohort");
 
         assert_eq!(error.status(), 400);
+    }
+
+    #[test]
+    fn live_routing_uses_the_versioned_stateless_contract() {
+        let response = build_live_route(ShadowRouteRequest {
+            agents: vec![AgentRegistration::new(
+                "agent-1",
+                "Agent one",
+                AgentRole::Coder,
+            )],
+            task: TaskEnvelope::new("route this mission"),
+        })
+        .expect("a valid live cohort should route");
+
+        assert_eq!(response.contract_version, ROUTING_CONTRACT_VERSION);
+        assert_eq!(response.recommended_agent_id.as_deref(), Some("agent-1"));
     }
 
     #[test]

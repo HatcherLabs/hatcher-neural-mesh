@@ -52,6 +52,13 @@ curl --fail --silent \
   --data '{"agents":[{"id":"agent-1","label":"Agent 1","role":"Coder","capability":{"intelligence":0.7,"specialization":0.7,"performance":0.8,"context":0.6,"memory":0.5},"resources":{"energy":0.1,"latency":0.1,"observed_latency_ms":100,"observed_cost":1,"observations":3},"confidence":0.7,"expertise":{"general":0.7},"tags":["openclaw","active"]}],"task":{"task_id":"smoke","description":"smoke","domain":"general","features":[0.1],"urgency":0.5,"constraints":{"max_latency_ms":1000,"max_cost":10},"metadata":{"contract_version":"shadow.v1"}}}' \
   "http://127.0.0.1:${port}/api/shadow/route" > "$response_file"
 grep -Fq '"contract_version":"shadow.v1"' "$response_file"
+
+curl --fail --silent --show-error \
+  --header 'content-type: application/json' \
+  --header "x-hatcher-mesh-token: ${token}" \
+  --data '{"agents":[{"id":"agent-1","label":"Agent 1","role":"Coder","capability":{"intelligence":0.7,"specialization":0.7,"performance":0.8,"context":0.6,"memory":0.5},"resources":{"energy":0.1,"latency":0.1,"observed_latency_ms":100,"observed_cost":1,"observations":3},"confidence":0.7,"expertise":{"general":0.7},"tags":["openclaw","active"]}],"task":{"task_id":"smoke-live","description":"smoke","domain":"general","features":[0.1],"urgency":0.5,"constraints":{"max_latency_ms":1000,"max_cost":10},"metadata":{"contract_version":"route.v2"}}}' \
+  "http://127.0.0.1:${port}/api/route" > "$response_file"
+grep -Fq '"contract_version":"route.v2"' "$response_file"
 grep -Fq '"recommended_agent_id":"agent-1"' "$response_file"
 
 restricted_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \

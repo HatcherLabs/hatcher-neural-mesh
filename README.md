@@ -9,8 +9,9 @@
 This repository is the open-source intelligence engine for Hatcher's adaptive agent
 routing work. It is currently a **technical preview**: the typed routing, outcome,
 replay, trust, and ONNX contracts are implemented, while Hatcher production routing
-remains in shadow evaluation. The included policy is not a trained reinforcement-learning
-model, and the digest layer is not a zero-knowledge proof system.
+supports both shadow evaluation and explicitly opted-in, canary-gated Live Mode. The
+included policy is not a trained reinforcement-learning model, and the digest layer is not
+a zero-knowledge proof system.
 
 A Rust-native agentic mesh: an adaptive, decentralized multi-agent intelligence
 framework where agent capability is multiplicative, collective intelligence is emergent
@@ -296,6 +297,7 @@ The integration contract is served alongside it:
 | inspect / abandon | `GET /api/runs`, `GET /api/runs/{id}`, `DELETE /api/runs/{id}` |
 | evidence | `GET /api/benchmark`, `POST /api/replay` |
 | tenant-local shadow rank | `POST /api/shadow/route` |
+| tenant-local live-capable rank | `POST /api/route` |
 
 ```bash
 HATCHER_MESH_PORT=3030 cargo run -p hatcher-ux -- serve
@@ -306,13 +308,16 @@ The frontend's own backend stays at `:3001`; this listens on `HATCHER_MESH_PORT`
 past localhost. Coefficient writes are validated, so a bad tuning gets a `400` instead of
 quietly making the mesh diverge.
 
-Hatcher's shadow adapter uses the stateless `/api/shadow/route` surface. Every request
+Hatcher uses the stateless, versioned `/api/route` surface for guarded Live Mode and
+keeps `/api/shadow/route` for rollback compatibility. Every request
 supplies one owner's complete candidate cohort, builds an empty request-local mesh, and
-returns a recommendation without changing shared state. Keep this sidecar private to the
+returns a recommendation without changing shared state. The sidecar never executes an
+agent; Hatcher owns canary selection, confidence and constraint gates, concurrency locks,
+fallback, and rollback. Keep this sidecar private to the
 Hatcher API host. The endpoint rejects cohorts larger than 128 agents and caps request
 bodies at 256 KiB.
 
-### Production shadow sidecar
+### Production routing sidecar
 
 Production must use the restricted surface and fail-closed token policy:
 
@@ -338,8 +343,9 @@ sudo install -o root -g root -m 0600 .env.production.mesh \
 ```
 
 The Hatcher API receives the same secret through `HATCHER_NEURAL_MESH_TOKEN`. Do not put
-the sidecar behind the public reverse proxy. In shadow-only mode, every demo/stateful
-endpoint is removed; only `/health`, `/api/contract`, and `/api/shadow/route` remain.
+the sidecar behind the public reverse proxy. In restricted mode, every demo/stateful
+endpoint is removed; only `/health`, `/api/contract`, `/api/shadow/route`, and
+`/api/route` remain.
 
 ## ONNX decision heads
 

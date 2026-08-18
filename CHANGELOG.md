@@ -3,6 +3,12 @@
 All crates are versioned in lockstep: a HAMNS release is a release of the whole
 mesh. This project follows [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+- Added the authenticated, stateless `POST /api/route` contract (`route.v2`) used by
+  Hatcher's guarded Live Mode. The legacy `POST /api/shadow/route` (`shadow.v1`) remains
+  available for rollback compatibility; execution authority stays in Hatcher.
+
 ## [1.0.0] — 2026-08-10
 
 The mesh stops having to invent its own outcomes.
