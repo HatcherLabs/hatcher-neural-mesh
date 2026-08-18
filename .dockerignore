@@ -1,0 +1,9 @@
+.git
+.github
+target
+coverage
+models/*.onnx
+models/*.onnx.data
+*.log
+.env*
+

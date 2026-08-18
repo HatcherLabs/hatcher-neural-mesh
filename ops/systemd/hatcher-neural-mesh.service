@@ -1,0 +1,44 @@
+[Unit]
+Description=Hatcher Neural Mesh private shadow-routing sidecar
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+ExecStartPre=-/usr/bin/docker rm -f hatcher-neural-mesh
+ExecStart=/usr/bin/docker run --rm --name hatcher-neural-mesh --publish 127.0.0.1:3030:3030 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges --memory 512m --cpus 1 --pids-limit 128 --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 --env-file @@ENV_FILE@@ @@IMAGE@@
+ExecStop=/usr/bin/docker stop --time 20 hatcher-neural-mesh
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+KillMode=process
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
